@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>nbody — startup/menu layout options</title>
+<style>
+  :root { --bg:#0d1017; --panel:#161b26; --panel2:#1e2534; --edge:#2c3547; --txt:#cdd6e4; --hi:#7aa2ff; --accent:#ffd166; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:#0a0c11; color:var(--txt); font:14px/1.4 'Segoe UI', system-ui, sans-serif; padding:18px; }
+  h1 { font-size:18px; margin-bottom:4px; }
+  .sub { color:#8b96ab; margin-bottom:14px; }
+  .tabs { display:flex; gap:8px; margin-bottom:14px; }
+  .tabs button { background:var(--panel); color:var(--txt); border:1px solid var(--edge); padding:8px 14px; border-radius:8px; cursor:pointer; font-size:14px; }
+  .tabs button.sel { background:var(--hi); color:#0b0e14; font-weight:600; border-color:var(--hi); }
+  .stage { position:relative; width:832px; height:560px; background:var(--bg); border:1px solid var(--edge); border-radius:10px; overflow:hidden; user-select:none; }
+  .canvas { position:absolute; inset:0; }
+  .canvas .b { position:absolute; border-radius:50%; transform:translate(-50%,-50%); }
+  .hud { position:absolute; left:0; right:0; bottom:0; background:linear-gradient(transparent, rgba(0,0,0,.55)); color:#9fb0c8; font-size:12px; padding:18px 12px 8px; }
+  .menubar, .side { z-index:5; position:absolute; }
+  .group { position:relative; display:inline-block; }
+  .group > .lbl { padding:6px 12px; background:var(--panel); border:1px solid var(--edge); border-radius:7px; cursor:pointer; white-space:nowrap; }
+  .group > .lbl:hover, .group.open > .lbl { background:var(--panel2); border-color:var(--hi); color:#fff; }
+  .group > .lbl b { color:var(--accent); font-weight:600; }
+  .drop { position:absolute; top:calc(100% + 6px); left:0; min-width:190px; background:var(--panel2); border:1px solid var(--edge); border-radius:8px; padding:6px; display:none; box-shadow:0 8px 24px rgba(0,0,0,.5); }
+  .group.open .drop { display:block; }
+  .drop .opt { padding:7px 10px; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; gap:12px; }
+  .drop .opt:hover { background:rgba(122,162,255,.15); }
+  .drop .opt.cur { color:var(--hi); font-weight:600; }
+  .drop .opt.cur::after { content:"✓"; }
+  .drop .sep { border-top:1px solid var(--edge); margin:5px 4px; font-size:11px; color:#69748a; padding-top:6px; }
+  .drop .val { display:flex; align-items:center; gap:8px; padding:6px 10px; }
+  .drop .val input[type=range] { flex:1; accent-color:var(--hi); }
+  /* layout A: top bar */
+  .menubar.a { top:10px; left:10px; right:10px; display:flex; gap:6px; }
+  .a .hud { right:150px; }
+  /* layout B: side panel */
+  .side.b { top:10px; right:10px; bottom:10px; width:210px; background:rgba(22,27,38,.92); border:1px solid var(--edge); border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:6px; }
+  .side.b .group { display:block; }
+  .side.b .drop { position:static; display:none; box-shadow:none; margin-top:4px; }
+  .side.b .group.open .drop { display:block; }
+  .b .hud { right:230px; }
+  /* layout C: corner */
+  .menubar.c { bottom:10px; left:10px; display:flex; gap:6px; }
+  .c .group > .drop { bottom:calc(100% + 6px); top:auto; }
+  .c .hud { left:auto; }
+  .paused { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(13,16,23,.85); border:1px solid var(--accent); color:var(--accent); padding:6px 16px; border-radius:8px; font-size:13px; display:none; z-index:4; }
+  .paused.show { display:block; }
+  .staged { position:absolute; top:12px; right:12px; background:rgba(255,209,102,.12); border:1px dashed var(--accent); color:var(--accent); padding:6px 12px; border-radius:8px; font-size:12px; display:none; z-index:6; }
+  .staged.show { display:block; }
+  .note { max-width:832px; margin-top:12px; color:#8b96ab; font-size:13px; }
+  .log { max-width:832px; margin-top:8px; background:var(--panel); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; font-size:12px; color:#9fb0c8; min-height:22px; }
+  kbd { background:var(--panel2); border:1px solid var(--edge); border-radius:4px; padding:1px 5px; font-size:11px; }
+</style>
+</head>
+<body>
+<h1>In-window menu — three layout options</h1>
+<div class="sub">Click the group headers to open dropdowns, pick options, and press <kbd>Space</kbd> to see the gentle pause/staging behavior. Layouts are toggled above; physics keeps running under the menu (unless paused).</div>
+<div class="tabs" id="tabs"></div>
+<div class="stage" id="stage">
+  <div class="canvas" id="canvas"></div>
+  <div class="paused" id="pausedTag">PAUSED — <kbd>Space</kbd> resumes</div>
+  <div class="staged" id="stagedTag"></div>
+  <div id="menuHost"></div>
+  <div class="hud" id="hud">two-body | rk4 | FPS 60 | UPS 120 | 2 bodies | t=12.4</div>
+</div>
+<div class="note" id="note"></div>
+<div class="log" id="log">log: pick something…</div>
+
+<script>
+const presets = ["two-body","solar-system","random-cloud","figure-eight"];
+const integrators = ["RK4","Euler"];
+const state = { layout:"A", preset:"two-body", integrator:"RK4", dt:8, seed:42, paused:false, staged:null, openGroup:null };
+
+const NOTES = {
+  A:"A — Top bar: compact strip of group headers across the top. Dropdowns overlay the scene briefly. Least intrusive over time; most like a classic desktop app. Menu stays reachable during a run; drag-pan/wheel-zoom still work everywhere except on a header.",
+  B:"B — Side panel: a slim always-visible rail on the right; groups are accordion sections that expand in place. Zero surprise (everything visible at once), costs ~210px of scene width forever. Nicest on wide windows.",
+  C:"C — Corner dock: headers live bottom-left, dropdowns grow upward. Scene's top half stays 100% clear; very unobtrusive. Slightly less discoverable (headers are small), works well with the HUD also living bottom.",
+};
+
+const tabs = document.getElementById("tabs");
+["A","B","C"].forEach(L => {
+  const b = document.createElement("button");
+  b.textContent = {A:"A · Top bar", B:"B · Side panel", C:"C · Corner dock"}[L];
+  b.onclick = () => { state.layout=L; state.openGroup=null; render(); };
+  tabs.appendChild(b);
+});
+
+function log(m){ document.getElementById("log").textContent = "log: " + m; }
+
+function groupHTML(name, body){
+  return `<div class="group" data-g="${name}"><span class="lbl">${name}: <b>${labelFor(name)}</b></span><div class="drop">${body}</div></div>`;
+}
+function labelFor(name){
+  if(name==="Preset") return state.preset;
+  if(name==="Integrator") return state.integrator;
+  if(name==="Physics") return `dt 1/${state.dt}`;
+  if(name==="Random seed") return state.seed;
+  return "";
+}
+function opt(list, cur, pick, group){
+  return list.map(v => `<div class="opt ${v===cur?'cur':''}" data-group="${group}" data-v="${v}">${v}</div>`).join("");
+}
+function menuHTML(){
+  const presetBody = opt(presets, state.preset, null, "Preset");
+  const integBody = opt(integrators, state.integrator, null, "Integrator");
+  const physBody = `
+    <div class="val">time step <input type="range" min="3" max="12" value="${Math.log2(state.dt)}" data-k="dt"><span>1/${state.dt}</span></div>
+    <div class="sep">reset</div>
+    <div class="opt" data-group="Physics" data-v="reset">↻ restart scene</div>`;
+  const seedBody = `
+    <div class="val">seed <input type="range" min="1" max="100" value="${state.seed}" data-k="seed"><span>${state.seed}</span></div>
+    <div class="sep">only affects random-cloud</div>`;
+  const g = [groupHTML("Preset",presetBody), groupHTML("Integrator",integBody), groupHTML("Physics",physBody), groupHTML("Random seed",seedBody)];
+  if(state.layout==="B")
+    return `<div class="side b">${g.join("")}</div>`;
+  if(state.layout==="C")
+    return `<div class="menubar c">${g.join("")}</div>`;
+  return `<div class="menubar a">${g.join("")}</div>`;
+}
+
+function bodies(){
+  const c=[];
+  const pal=["#ff6b6b","#7aa2ff","#ffd166","#6bd4a0","#c792ea","#f78c6c","#89ddff","#f07178"];
+  if(state.preset==="two-body")  c.push({x:.38,y:.5,r:9,c:pal[0]},{x:.62,y:.5,r:9,c:pal[1]});
+  if(state.preset==="solar-system"){c.push({x:.5,y:.5,r:16,c:pal[2]});[70,120,180,250].forEach((d,i)=>c.push({x:.5+d/832*Math.cos(i*1.9),y:.5+d/560*Math.sin(i*1.9),r:5,c:pal[i+3]}));}
+  if(state.preset==="random-cloud"){for(let i=0;i<40;i++)c.push({x:.2+.6*Math.random(),y:.15+.7*Math.random(),r:3+4*Math.random(),c:pal[i%8]});}
+  if(state.preset==="figure-eight"){c.push({x:.40,y:.42,r:8,c:pal[0]},{x:.60,y:.58,r:8,c:pal[1]},{x:.50,y:.66,r:8,c:pal[2]});}
+  return c;
+}
+function drawScene(){
+  const cv=document.getElementById("canvas");
+  cv.innerHTML = bodies().map(b=>`<div class="b" style="left:${b.x*832}px;top:${b.y*560}px;width:${b.r*2}px;height:${b.r*2}px;background:${b.c}"></div>`).join("");
+  document.getElementById("hud").textContent = `${state.staged?state.staged+" (staged→resume) | ":""}${state.preset} | ${state.integrator.toLowerCase()} | FPS 60 | UPS 120 | ${state.preset==="random-cloud"?"150":bodies().length} bodies | t=${(state.paused?state.t??12.4:12.4).toFixed(1)}`;
+  document.getElementById("pausedTag").classList.toggle("show", state.paused);
+  const st=document.getElementById("stagedTag");
+  st.classList.toggle("show", !!state.staged && state.paused);
+  st.textContent = state.staged ? "⏸ change staged: "+state.staged : "";
+}
+
+function applyChoice(group, v){
+  const change = group==="Preset" ? `preset → ${v}` : group==="Integrator" ? `integrator → ${v}` : `${group} → ${v}`;
+  if(state.paused && (group==="Preset" || group==="Integrator")){
+    state.staged = change;
+    log(`paused: ${change} staged — applies when you resume (Space)`);
+  } else {
+    if(group==="Preset"){state.preset=v; state.staged=null;}
+    if(group==="Integrator"){state.integrator=v; state.staged=null;}
+    log(`${change} applied live${group==="Preset"?" — scene swapped, timer reset":""}`);
+  }
+}
+
+document.getElementById("stage").addEventListener("click", e => {
+  const lbl = e.target.closest(".lbl");
+  const op  = e.target.closest(".opt");
+  if(lbl){ const g=lbl.parentElement.dataset.g; state.openGroup = state.openGroup===g?null:g; render(); return; }
+  if(op){ applyChoice(op.dataset.group, op.dataset.v); state.openGroup=null; render(); return; }
+  state.openGroup=null; render();
+});
+document.getElementById("stage").addEventListener("input", e => {
+  if(e.target.dataset.k==="dt"){ state.dt=Math.pow(2,+e.target.value); log(`dt → 1/${state.dt} (applies live)`); render(); }
+  if(e.target.dataset.k==="seed"){ state.seed=+e.target.value; log(`seed → ${state.seed}`); render(); }
+});
+window.addEventListener("keydown", e => {
+  if(e.code==="Space"){ e.preventDefault();
+    state.paused=!state.paused;
+    if(!state.paused && state.staged){
+      const s=state.staged; state.staged=null;
+      if(s.startsWith("preset → ")) state.preset=s.slice(9);
+      if(s.startsWith("integrator → ")) state.integrator=s.slice(13);
+      log(`resumed — staged change applied: ${s}`);
+    } else log(state.paused?"paused — physics frozen, menu still live":"resumed");
+    render();
+  }
+});
+
+function render(){
+  document.querySelectorAll(".tabs button").forEach((b,i)=>b.classList.toggle("sel", ["A","B","C"][i]===state.layout));
+  document.getElementById("menuHost").innerHTML = menuHTML();
+  document.querySelectorAll("#menuHost .group").forEach(g=>g.classList.toggle("open", g.dataset.g===state.openGroup));
+  document.getElementById("note").textContent = NOTES[state.layout];
+  drawScene();
+}
+render();
+</script>
+</body>
+</html>
