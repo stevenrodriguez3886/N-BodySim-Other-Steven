@@ -13,6 +13,7 @@ add_executable(nbody_core_tests
   core/test_smoke.cpp
   core/test_vec2.cpp
   core/test_gravity.cpp
+  core/test_euler.cpp
 )
 target_link_libraries(nbody_core_tests PRIVATE nbody_core Catch2::Catch2WithMain)
 catch_discover_tests(nbody_core_tests)
