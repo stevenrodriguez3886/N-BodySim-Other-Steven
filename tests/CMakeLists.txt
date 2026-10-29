@@ -24,8 +24,9 @@ catch_discover_tests(nbody_core_tests)
 # Task 1 also registers the binary-level smoke check: nbody --smoke must exit 0.
 add_test(NAME nbody_smoke COMMAND nbody --smoke)
 
-# nbody_app_tests (Task 7): CLI arg parsing only. Links nbody_app but never
-# instantiates an SFML window (pure code; this exe must run display-free).
-add_executable(nbody_app_tests app/test_args.cpp)
+# nbody_app_tests (Task 7): CLI arg parsing; Task 8 adds Camera math. Links
+# nbody_app but never instantiates an SFML window (pure code; this exe must
+# run display-free).
+add_executable(nbody_app_tests app/test_args.cpp app/test_camera.cpp)
 target_link_libraries(nbody_app_tests PRIVATE nbody_app Catch2::Catch2WithMain)
 catch_discover_tests(nbody_app_tests)

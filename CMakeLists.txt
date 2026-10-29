@@ -32,7 +32,8 @@ target_compile_features(nbody_core PUBLIC cxx_std_17)
 # to a real STATIC library. SFML is PRIVATE per plan section A: app consumers
 # get nbody_core transitively but no SFML link/include leak (the nbody exe
 # names its own SFML links below).
-add_library(nbody_app STATIC src/app/AppArgs.cpp src/app/HeadlessRunner.cpp)
+add_library(nbody_app STATIC src/app/AppArgs.cpp src/app/HeadlessRunner.cpp
+  src/app/Camera.cpp)
 target_include_directories(nbody_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(nbody_app PUBLIC cxx_std_17)
 target_link_libraries(nbody_app PUBLIC nbody_core
