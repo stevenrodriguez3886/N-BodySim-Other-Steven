@@ -1,6 +1,7 @@
-// Task 7 dispatch: parseArgs -> help / headless / smoke / windowed.
-// The windowed path is still the temporary open/close loop from Task 1 —
-// the real SimulationApp lands in Task 9 (search "TEMPORARY WINDOWED PATH").
+// Task 9 dispatch: parseArgs -> help / headless / smoke / windowed. The
+// windowed path now constructs the real SimulationApp; the display probe
+// stays (SFML aborts uncatchably without an X display, and SimulationApp's
+// ctor opens a window, so the probe must gate construction).
 #include <SFML/Graphics.hpp>
 
 #include <dlfcn.h>
@@ -8,11 +9,13 @@
 #include <exception>
 #include <iostream>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
 #include "nbody/app/AppArgs.hpp"
 #include "nbody/app/HeadlessRunner.hpp"
+#include "nbody/app/SimulationApp.hpp"
 #include "nbody/core/Presets.hpp"
 
 namespace {
@@ -66,6 +69,30 @@ int runSmoke() {
     }
     return 0;
 }
+
+// CLI token spellings, reused for the windowed path's title/HUD prefix
+// ("<preset> | <integrator>", per plan D.2). SimulationApp appends the live
+// FPS/UPS/body/time stats to this base.
+std::string windowTitle(const nbody::app::AppArgs& a) {
+    std::string_view preset = "two-body";
+    switch (a.preset) {
+        case nbody::core::PresetName::TwoBody:
+            preset = "two-body";
+            break;
+        case nbody::core::PresetName::SolarSystem:
+            preset = "solar-system";
+            break;
+        case nbody::core::PresetName::RandomCloud:
+            preset = "random-cloud";
+            break;
+        case nbody::core::PresetName::FigureEight:
+            preset = "figure-eight";
+            break;
+    }
+    const std::string_view integrator =
+        a.integrator == nbody::core::IntegratorKind::Euler ? "euler" : "rk4";
+    return std::string(preset) + " | " + std::string(integrator);
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -94,27 +121,14 @@ int main(int argc, char** argv) {
         return runSmoke();
     }
 
-    // --- TEMPORARY WINDOWED PATH (Task 1 placeholder) -----------------------
-    // Task 9 replaces this loop with SimulationApp (rendering, camera, HUD,
-    // fixed-step accumulator). The display probe must stay until then.
+    // --- Windowed path: the real interactive app (Task 9) -------------------
+    // The display probe stays in main.cpp: SimulationApp's ctor opens a
+    // window, and SFML abort()s uncatchably without an X display.
     if (!displayReachable()) {
         std::cout << "nbody: cannot open a display; use --headless=<n>\n";
         return 1;
     }
-    sf::Window window(sf::VideoMode(kWindowSize), "nbody");
-    sf::Clock frameClock;
-    while (window.isOpen()) {
-        while (const std::optional<sf::Event> ev = window.pollEvent()) {
-            if (ev->is<sf::Event::Closed>()) {
-                window.close();
-            } else if (const auto* key = ev->getIf<sf::Event::KeyPressed>()) {
-                if (key->code == sf::Keyboard::Key::Escape) {
-                    window.close();
-                }
-            }
-        }
-        (void)frameClock.restart();  // frame pacing placeholder (Task 9)
-        window.display();
-    }
-    return 0;
+    nbody::app::SimulationApp app{std::move(setup), args->integrator,
+                                  windowTitle(*args)};
+    return app.run();
 }

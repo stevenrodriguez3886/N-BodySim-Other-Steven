@@ -27,6 +27,7 @@ add_test(NAME nbody_smoke COMMAND nbody --smoke)
 # nbody_app_tests (Task 7): CLI arg parsing; Task 8 adds Camera math. Links
 # nbody_app but never instantiates an SFML window (pure code; this exe must
 # run display-free).
-add_executable(nbody_app_tests app/test_args.cpp app/test_camera.cpp)
+add_executable(nbody_app_tests app/test_args.cpp app/test_camera.cpp
+  app/test_step_planning.cpp)
 target_link_libraries(nbody_app_tests PRIVATE nbody_app Catch2::Catch2WithMain)
 catch_discover_tests(nbody_app_tests)
