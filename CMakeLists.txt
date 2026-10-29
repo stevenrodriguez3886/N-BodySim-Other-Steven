@@ -23,7 +23,8 @@ endif()
 
 # nbody_core: real STATIC library (first source landed in Task 3).
 # nbody_core MUST NOT link anything (incl. SFML). Enforced: no link line here.
-add_library(nbody_core STATIC src/core/GravityField.cpp src/core/EulerIntegrator.cpp)
+add_library(nbody_core STATIC src/core/GravityField.cpp src/core/EulerIntegrator.cpp
+  src/core/Rk4Integrator.cpp)
 target_include_directories(nbody_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(nbody_core PUBLIC cxx_std_17)
 
