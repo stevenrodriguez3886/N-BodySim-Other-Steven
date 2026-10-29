@@ -72,10 +72,17 @@ TEST_CASE("menu_narrow_window_clips_headers") {
 TEST_CASE("menu_short_window_flips_items_upward") {
     const auto layout = menuLayout(800.0, 140.0, MenuGroup::Physics);
     REQUIRE(layout.items.size() == 7);
-    for (const auto& item : layout.items) {
-        REQUIRE(item.topLeft.y < 38.0);
-        REQUIRE(item.topLeft.y + item.size.y <= 34.0);
+    constexpr double flippedBottom = 6.0;
+    constexpr double rowHeight = 24.0;
+    for (std::size_t index = 0; index < layout.items.size(); ++index) {
+        const auto& item = layout.items[index];
+        REQUIRE(item.size.y == rowHeight);
+        REQUIRE(item.topLeft.y ==
+                flippedBottom -
+                    static_cast<double>(layout.items.size() - index) * rowHeight);
     }
+    const auto& lastItem = layout.items.back();
+    REQUIRE(lastItem.topLeft.y + lastItem.size.y == flippedBottom);
 }
 
 TEST_CASE("menu_item_labels") {
