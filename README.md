@@ -79,7 +79,9 @@ choice made in each group wins.
 
 Physics offers time steps of `1/30`, `1/60`, `1/120`, `1/240`, and `1/480`,
 plus a **Restart scene** action that uses the currently selected preset and
-seed. The `R` key uses those same current menu options. If `--dt` sets a value
+seed. The `R` key uses those same current menu options. Both restarts act
+immediately, even while paused, and use the already-applied options — staged
+choices stay pending until resume. If `--dt` sets a value
 outside the menu list, the Physics header shows that raw value and no dropdown
 choice is ticked. The seed stepper changes the value by one and does not go
 below zero. Menu navigation is mouse-only; keyboard menu navigation is not
