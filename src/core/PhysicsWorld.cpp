@@ -54,6 +54,12 @@ void PhysicsWorld::setIntegrator(std::unique_ptr<IIntegrator> integrator) {
     integrator_ = std::move(integrator);
 }
 
+void PhysicsWorld::setGravity(double g, double softening) {
+    cfg_.g = g;
+    cfg_.softening = softening;
+    gravity_ = GravityField(g, softening);
+}
+
 void PhysicsWorld::setTimeStep(double dt) {
     assert(dt > 0.0 && std::isfinite(dt));
     cfg_.timeStep = dt;

@@ -128,7 +128,8 @@ int main(int argc, char** argv) {
         std::cout << "nbody: cannot open a display; use --headless=<n>\n";
         return 1;
     }
-    nbody::app::SimulationApp app{std::move(setup), args->integrator,
-                                  windowTitle(*args)};
+    const std::string title = windowTitle(*args);
+    nbody::app::SimulationApp app{std::move(setup), args->preset, args->seed,
+                                  args->integrator, title};
     return app.run();
 }

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -62,21 +63,124 @@ std::string formatStats(double fps, double ups, std::size_t bodies,
     return out.str();
 }
 
+std::string menuValue(const nbody::app::MenuState& state,
+                      nbody::app::MenuGroup group) {
+    using nbody::app::MenuGroup;
+    if (group == MenuGroup::Seed) {
+        return std::to_string(state.seed);
+    }
+    if (group == MenuGroup::Physics) {
+        const int ticked = nbody::app::menuTickedIndex(state, group);
+        if (ticked >= 0) {
+            return nbody::app::menuItemLabel(group, ticked, state.seed);
+        }
+        std::ostringstream out;
+        out << std::setprecision(12) << state.dt;
+        return out.str();
+    }
+    const int ticked = nbody::app::menuTickedIndex(state, group);
+    return nbody::app::menuItemLabel(group, ticked, state.seed);
+}
+
+std::string liveTitle(const nbody::app::MenuState& state) {
+    using nbody::app::MenuGroup;
+    return nbody::app::menuItemLabel(
+               MenuGroup::Preset,
+               nbody::app::menuTickedIndex(state, MenuGroup::Preset),
+               state.seed) +
+           " | " +
+           nbody::app::menuItemLabel(
+               MenuGroup::Integrator,
+               nbody::app::menuTickedIndex(state, MenuGroup::Integrator),
+               state.seed);
+}
+
 }  // namespace
 
 namespace nbody::app {
 
 SimulationApp::SimulationApp(core::SimulationSetup setup,
+                             core::PresetName preset, std::uint32_t seed,
                              core::IntegratorKind integrator,
-                             std::string baseTitle)
+                             std::string_view title)
     : world_{setup.config, core::makeIntegrator(integrator)}
-    , presetBodies_(setup.bodies)  // copy: world_.reset() consumes below
-    , baseTitle_(std::move(baseTitle))
-    , window_{sf::VideoMode(sf::Vector2u{800U, 600U}), baseTitle_}
+    , window_{sf::VideoMode(sf::Vector2u{800U, 600U}), std::string(title)}
     , font_{loadHudFont()} {
+    menuState_.preset = preset;
+    menuState_.integrator = integrator;
+    menuState_.seed = seed;
+    menuState_.dt = setup.config.timeStep;
     world_.reset(std::move(setup.bodies));
     fitCamera();
     updateStats();  // seed the title-bar stats so the HUD isn't blank pre-0.5 s
+}
+
+void SimulationApp::rebuildScene(bool refitCamera) {
+    core::SimulationSetup setup =
+        core::createPreset(menuState_.preset, menuState_.seed);
+    world_.setGravity(setup.config.g, setup.config.softening);
+    world_.reset(std::move(setup.bodies));
+    world_.setTimeStep(menuState_.dt);
+    accumulator_ = 0.0;
+    if (refitCamera) {
+        fitCamera();
+    }
+}
+
+void SimulationApp::restartScene() {
+    rebuildScene(true);
+}
+
+void SimulationApp::handleAction(const MenuAction& action) {
+    switch (menuApply(menuState_, action, paused_)) {
+        case MenuEffect::PresetChanged:
+            rebuildScene(true);
+            break;
+        case MenuEffect::IntegratorChanged:
+            world_.setIntegrator(core::makeIntegrator(menuState_.integrator));
+            break;
+        case MenuEffect::DtChanged:
+            world_.setTimeStep(menuState_.dt);
+            break;
+        case MenuEffect::SeedChanged:
+            if (menuState_.preset == core::PresetName::RandomCloud) {
+                rebuildScene(false);
+            }
+            break;
+        case MenuEffect::SceneRestart:
+            restartScene();
+            break;
+        case MenuEffect::Staged:
+        case MenuEffect::None:
+            break;
+    }
+}
+
+void SimulationApp::handleMenuHit(const MenuHit& hit, core::Vec2 position) {
+    if (hit.kind == MenuHitKind::Header) {
+        if (menuState_.openGroup == hit.group) {
+            menuState_.openGroup.reset();
+        } else {
+            menuState_.openGroup = hit.group;
+        }
+        return;
+    }
+    if (hit.kind != MenuHitKind::Item) {
+        return;
+    }
+
+    const sf::Vector2u size = window_.getSize();
+    const MenuLayout layout = menuLayout(
+        static_cast<double>(size.x), static_cast<double>(size.y),
+        menuState_.openGroup);
+    for (const MenuRect& row : layout.disabledRows) {
+        if (row.contains(position)) {
+            return;
+        }
+    }
+
+    menuState_.openGroup.reset();
+    handleAction({hit.group, hit.index});
 }
 
 void SimulationApp::fitCamera() {
@@ -106,16 +210,38 @@ void SimulationApp::handleEvents() {
         }
         if (const auto* key = ev->getIf<sf::Event::KeyPressed>()) {
             if (key->code == sf::Keyboard::Key::Escape) {
-                window_.close();
+                if (menuState_.openGroup) {
+                    menuState_.openGroup.reset();
+                } else {
+                    window_.close();
+                }
             } else if (key->code == sf::Keyboard::Key::Space) {
+                if (paused_) {
+                    const MenuStaged staged = menuTakeStaged(menuState_);
+                    if (staged.preset) {
+                        menuState_.preset = *staged.preset;
+                        rebuildScene(true);
+                    }
+                    if (staged.integrator) {
+                        menuState_.integrator = *staged.integrator;
+                        world_.setIntegrator(
+                            core::makeIntegrator(menuState_.integrator));
+                    }
+                    // Apply dt after a preset rebuild so the staged value wins.
+                    if (staged.dt) {
+                        menuState_.dt = *staged.dt;
+                        world_.setTimeStep(menuState_.dt);
+                    }
+                    if (staged.seed) {
+                        menuState_.seed = *staged.seed;
+                        if (menuState_.preset == core::PresetName::RandomCloud) {
+                            rebuildScene(false);
+                        }
+                    }
+                }
                 paused_ = !paused_;  // rendering continues while paused
             } else if (key->code == sf::Keyboard::Key::R) {
-                // PhysicsWorld::reset preserves caller-assigned nonzero ids,
-                // and the presets carry ids 1..N, so palette colors (id % 8)
-                // are stable across R. (Fresh monotonic ids apply only to
-                // bodies whose id is 0.)
-                world_.reset(presetBodies_);
-                accumulator_ = 0.0;
+                restartScene();
             }
             continue;
         }
@@ -130,10 +256,22 @@ void SimulationApp::handleEvents() {
                            static_cast<double>(wheel->delta),
                            static_cast<double>(size.x),
                            static_cast<double>(size.y));
-        } else if (press != nullptr &&
-                   press->button == sf::Mouse::Button::Left) {
-            dragging_ = true;
-            lastMouse_ = press->position;
+        } else if (press != nullptr) {
+            const core::Vec2 position{static_cast<double>(press->position.x),
+                                      static_cast<double>(press->position.y)};
+            const MenuLayout layout = menuLayout(
+                static_cast<double>(size.x), static_cast<double>(size.y),
+                menuState_.openGroup);
+            const MenuHit hit = menuHitTest(layout, position);
+            if (hit.kind != MenuHitKind::None) {
+                handleMenuHit(hit, position);
+            } else {
+                menuState_.openGroup.reset();
+                if (press->button == sf::Mouse::Button::Left) {
+                    dragging_ = true;
+                    lastMouse_ = press->position;
+                }
+            }
         } else if (release != nullptr &&
                    release->button == sf::Mouse::Button::Left) {
             dragging_ = false;
@@ -181,7 +319,7 @@ void SimulationApp::updateStats() {
     framesInWindow_ = 0;
     statsSuffix_ = formatStats(fps, ups, world_.bodies().size(),
                                world_.simulationTime());
-    window_.setTitle(baseTitle_ + statsSuffix_);
+    window_.setTitle(liveTitle(menuState_) + statsSuffix_);
 }
 
 void SimulationApp::render() {
@@ -201,12 +339,118 @@ void SimulationApp::render() {
         window_.draw(body);
     }
 
+    const MenuLayout layout = menuLayout(w, h, menuState_.openGroup);
+    sf::RectangleShape menuBackground{sf::Vector2f{static_cast<float>(w), 28.0F}};
+    menuBackground.setFillColor(sf::Color(10, 12, 24, 153));
+    window_.draw(menuBackground);
+
+    if (layout.openGroup && !layout.items.empty()) {
+        const MenuRect& first = layout.items.front();
+        const float rowHeight = static_cast<float>(first.size.y);
+        const float panelHeight = rowHeight *
+                                  static_cast<float>(layout.items.size());
+        sf::RectangleShape panel{sf::Vector2f{
+            static_cast<float>(first.size.x), panelHeight}};
+        panel.setPosition(sf::Vector2f{static_cast<float>(first.topLeft.x),
+                                       static_cast<float>(first.topLeft.y)});
+        panel.setFillColor(sf::Color(22, 25, 38, 235));
+        window_.draw(panel);
+    }
+
+    if (font_.has_value()) {
+        for (std::size_t index = 0; index < layout.headers.size(); ++index) {
+            const MenuGroup group = static_cast<MenuGroup>(index);
+            const MenuRect& rect = layout.headers[index];
+            sf::RectangleShape header{sf::Vector2f{
+                static_cast<float>(rect.size.x),
+                static_cast<float>(rect.size.y)}};
+            header.setPosition(sf::Vector2f{static_cast<float>(rect.topLeft.x),
+                                           static_cast<float>(rect.topLeft.y)});
+            header.setFillColor(menuState_.openGroup == group
+                                    ? sf::Color(70, 78, 96, 235)
+                                    : sf::Color(32, 36, 50, 210));
+            window_.draw(header);
+
+            sf::Text label{*font_};
+            label.setCharacterSize(12U);
+            label.setFillColor(kHudColor);
+            label.setString(std::string(menuGroupLabel(group)) + ": " +
+                            menuValue(menuState_, group));
+            label.setPosition(sf::Vector2f{
+                static_cast<float>(rect.topLeft.x + 7.0),
+                static_cast<float>(rect.topLeft.y + 7.0)});
+            window_.draw(label);
+        }
+
+        if (layout.openGroup) {
+            const int ticked = menuTickedIndex(menuState_, *layout.openGroup);
+            for (std::size_t index = 0; index < layout.items.size(); ++index) {
+                const MenuRect& rect = layout.items[index];
+                const bool disabled = std::any_of(
+                    layout.disabledRows.begin(), layout.disabledRows.end(),
+                    [&rect](const MenuRect& row) {
+                        return row.topLeft.y == rect.topLeft.y;
+                    });
+                if (disabled) {
+                    sf::RectangleShape separator{sf::Vector2f{
+                        static_cast<float>(rect.size.x - 16.0), 1.0F}};
+                    separator.setPosition(sf::Vector2f{
+                        static_cast<float>(rect.topLeft.x + 8.0),
+                        static_cast<float>(rect.topLeft.y +
+                                           rect.size.y / 2.0)});
+                    separator.setFillColor(sf::Color(105, 110, 125));
+                    window_.draw(separator);
+                    continue;
+                }
+
+                const std::string item = menuItemLabel(
+                    *layout.openGroup, static_cast<int>(index), menuState_.seed);
+                sf::Text label{*font_};
+                label.setCharacterSize(13U);
+                label.setFillColor(kHudColor);
+                label.setString(item);
+                label.setPosition(sf::Vector2f{
+                    static_cast<float>(rect.topLeft.x + 30.0),
+                    static_cast<float>(rect.topLeft.y + 3.0)});
+                window_.draw(label);
+
+                if (static_cast<int>(index) == ticked) {
+                    sf::Text tick{*font_};
+                    tick.setCharacterSize(13U);
+                    tick.setFillColor(sf::Color(150, 230, 170));
+                    tick.setString("\xE2\x9C\x93");
+                    tick.setPosition(sf::Vector2f{
+                        static_cast<float>(rect.topLeft.x + 8.0),
+                        static_cast<float>(rect.topLeft.y + 3.0)});
+                    window_.draw(tick);
+                }
+            }
+        }
+
+        if (paused_ && menuIsStagedActive(menuState_)) {
+            sf::Text chip{*font_};
+            chip.setCharacterSize(12U);
+            chip.setFillColor(kHudColor);
+            chip.setString(menuStagedSummary(menuState_));
+            const float chipWidth = chip.getLocalBounds().size.x + 16.0F;
+            const float chipX = std::max(
+                8.0F, static_cast<float>(size.x) - chipWidth - 8.0F);
+            sf::RectangleShape chipBackground{
+                sf::Vector2f{chipWidth, 24.0F}};
+            chipBackground.setPosition(sf::Vector2f{chipX, 4.0F});
+            chipBackground.setFillColor(sf::Color(70, 78, 96, 235));
+            window_.draw(chipBackground);
+            chip.setPosition(sf::Vector2f{chipX + 8.0F, 6.0F});
+            window_.draw(chip);
+        }
+    }
+
     if (font_.has_value()) {  // HUD on screen too (belt over the title bar)
         sf::Text hud{*font_};  // SFML 3: ctor takes the Font, no default ctor
         hud.setCharacterSize(14U);
         hud.setFillColor(kHudColor);
-        hud.setString(baseTitle_ + statsSuffix_);
-        hud.setPosition(sf::Vector2f{8.0F, 4.0F});
+        hud.setString(liveTitle(menuState_) + statsSuffix_);
+        hud.setPosition(sf::Vector2f{8.0F, 40.0F});
         window_.draw(hud);
     }
 }

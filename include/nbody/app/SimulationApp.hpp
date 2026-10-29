@@ -5,9 +5,12 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "nbody/app/Camera.hpp"
+#include "nbody/app/MenuBar.hpp"
+#include "nbody/app/MenuModel.hpp"
 #include "nbody/core/Body.hpp"
 #include "nbody/core/PhysicsWorld.hpp"
 #include "nbody/core/Presets.hpp"
@@ -24,10 +27,9 @@ namespace nbody::app {
 class SimulationApp {
 public:
     // Windowed branch entry point (main.cpp, after the display probe passes).
-    // `baseTitle` is the "<preset> | <integrator>" prefix; run() appends the
-    // live FPS/UPS/body-count/time stats to it.
-    SimulationApp(core::SimulationSetup setup, core::IntegratorKind integrator,
-                  std::string baseTitle);
+    SimulationApp(core::SimulationSetup setup, core::PresetName preset,
+                  std::uint32_t seed, core::IntegratorKind integrator,
+                  std::string_view title);
 
     SimulationApp(const SimulationApp&) = delete;
     SimulationApp& operator=(const SimulationApp&) = delete;
@@ -36,13 +38,16 @@ public:
 
 private:
     void handleEvents();
+    void handleMenuHit(const MenuHit& hit, core::Vec2 position);
+    void handleAction(const MenuAction& action);
+    void restartScene();
+    void rebuildScene(bool refitCamera);
     void update(sf::Time frameTime);
     void render();
     void updateStats();
 
     core::PhysicsWorld world_;
-    std::vector<core::Body> presetBodies_;  // stored for the R reset key
-    std::string baseTitle_;
+    MenuState menuState_;
     Camera camera_;
     sf::RenderWindow window_;
     sf::Clock frameClock_;

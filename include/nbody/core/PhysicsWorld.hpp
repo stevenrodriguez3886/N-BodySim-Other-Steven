@@ -31,6 +31,8 @@ public:
     // Effective from the next step(). Hot-swap is safe because integrators
     // are stateless across steps except scratch buffers owned by each instance.
     void setIntegrator(std::unique_ptr<IIntegrator> integrator);
+    // Effective from the next step(). Replaces the preset's gravity settings.
+    void setGravity(double g, double softening);
     // Effective from the next step(). dt must be positive and finite.
     void setTimeStep(double dt);
 
