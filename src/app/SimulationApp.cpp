@@ -29,6 +29,7 @@ constexpr sf::Color kBodyPalette[8]{
 
 constexpr sf::Color kBackground(10, 12, 24);
 constexpr sf::Color kHudColor(220, 220, 230);
+constexpr double kMenuStripBottom = 34.0;
 
 // SFML 3.0.x has NO Font::getDefault() (that is a later 3.1/master API;
 // verified against build/_deps/sfml-src/include/SFML/Graphics/Font.hpp — the
@@ -263,11 +264,13 @@ void SimulationApp::handleEvents() {
                 static_cast<double>(size.x), static_cast<double>(size.y),
                 menuState_.openGroup);
             const MenuHit hit = menuHitTest(layout, position);
-            if (hit.kind != MenuHitKind::None) {
+            if (press->button == sf::Mouse::Button::Left &&
+                hit.kind != MenuHitKind::None) {
                 handleMenuHit(hit, position);
             } else {
                 menuState_.openGroup.reset();
-                if (press->button == sf::Mouse::Button::Left) {
+                if (press->button == sf::Mouse::Button::Left &&
+                    position.y >= kMenuStripBottom) {
                     dragging_ = true;
                     lastMouse_ = press->position;
                 }
@@ -363,7 +366,9 @@ void SimulationApp::render() {
             const MenuRect& rect = layout.headers[index];
             sf::RectangleShape header{sf::Vector2f{
                 static_cast<float>(rect.size.x),
-                static_cast<float>(rect.size.y)}};
+                static_cast<float>(menuState_.openGroup == group
+                                       ? std::min(rect.size.y, 22.0)
+                                       : rect.size.y)}};
             header.setPosition(sf::Vector2f{static_cast<float>(rect.topLeft.x),
                                            static_cast<float>(rect.topLeft.y)});
             header.setFillColor(menuState_.openGroup == group
