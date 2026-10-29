@@ -76,6 +76,7 @@ SimulationApp::SimulationApp(core::SimulationSetup setup,
     , font_{loadHudFont()} {
     world_.reset(std::move(setup.bodies));
     fitCamera();
+    updateStats();  // seed the title-bar stats so the HUD isn't blank pre-0.5 s
 }
 
 void SimulationApp::fitCamera() {
@@ -109,6 +110,8 @@ void SimulationApp::handleEvents() {
             } else if (key->code == sf::Keyboard::Key::Space) {
                 paused_ = !paused_;  // rendering continues while paused
             } else if (key->code == sf::Keyboard::Key::R) {
+                // Note: reset() reassigns fresh monotonic ids in PhysicsWorld,
+                // so body palette colors (id % 8) may remap after R.
                 world_.reset(presetBodies_);
                 accumulator_ = 0.0;
             }
