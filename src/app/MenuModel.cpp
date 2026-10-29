@@ -1,6 +1,7 @@
 #include "nbody/app/MenuModel.hpp"
 
 #include <array>
+#include <limits>
 #include <string>
 
 namespace nbody::app {
@@ -131,7 +132,9 @@ MenuEffect menuApply(MenuState& state, const MenuAction& action, bool paused) {
                     --seed;
                 }
             } else {
-                ++seed;
+                if (seed < std::numeric_limits<std::uint32_t>::max()) {
+                    ++seed;
+                }
             }
             if (paused) {
                 staged.seed = seed;

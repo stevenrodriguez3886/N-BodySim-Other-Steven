@@ -2,6 +2,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
+#include <limits>
 #include <string>
 
 using nbody::app::MenuAction;
@@ -85,6 +87,22 @@ TEST_CASE("model_seed_stepper_floors_at_zero") {
     REQUIRE(menuApply(state, {MenuGroup::Seed, 1}, false) ==
             MenuEffect::SeedChanged);
     REQUIRE(state.seed == 8);
+}
+
+TEST_CASE("model_seed_stepper_saturates_high") {
+    constexpr auto maxSeed = std::numeric_limits<std::uint32_t>::max();
+
+    MenuState liveState;
+    liveState.seed = maxSeed;
+    REQUIRE(menuApply(liveState, {MenuGroup::Seed, 1}, false) ==
+            MenuEffect::SeedChanged);
+    REQUIRE(liveState.seed == maxSeed);
+
+    MenuState stagedState;
+    stagedState.seed = maxSeed;
+    REQUIRE(menuApply(stagedState, {MenuGroup::Seed, 1}, true) ==
+            MenuEffect::Staged);
+    REQUIRE(menuStaged(stagedState).seed == maxSeed);
 }
 
 TEST_CASE("model_offlist_dt_has_no_tick_until_a_menu_value_is_applied") {
