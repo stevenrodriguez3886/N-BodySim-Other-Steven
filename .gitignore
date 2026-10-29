@@ -1,0 +1,4 @@
+build/
+CMakeCache.txt
+*-build/
+.superpowers/
