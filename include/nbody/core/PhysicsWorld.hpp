@@ -28,6 +28,11 @@ public:
 
     void step();  // integrate one fixed dt, then merge
     void reset(std::vector<Body> bodies);
+    // Effective from the next step(). Hot-swap is safe because integrators
+    // are stateless across steps except scratch buffers owned by each instance.
+    void setIntegrator(std::unique_ptr<IIntegrator> integrator);
+    // Effective from the next step(). dt must be positive and finite.
+    void setTimeStep(double dt);
 
     const std::vector<Body>& bodies() const;
     const GravityField& gravity() const;

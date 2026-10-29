@@ -49,6 +49,16 @@ void PhysicsWorld::reset(std::vector<Body> bodies) {
     }
 }
 
+void PhysicsWorld::setIntegrator(std::unique_ptr<IIntegrator> integrator) {
+    assert(integrator != nullptr);
+    integrator_ = std::move(integrator);
+}
+
+void PhysicsWorld::setTimeStep(double dt) {
+    assert(dt > 0.0 && std::isfinite(dt));
+    cfg_.timeStep = dt;
+}
+
 const std::vector<Body>& PhysicsWorld::bodies() const {
     return bodies_;
 }

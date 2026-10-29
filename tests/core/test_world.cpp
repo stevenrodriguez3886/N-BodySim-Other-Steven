@@ -12,6 +12,7 @@
 #include "nbody/core/GravityField.hpp"
 #include "nbody/core/Integrator.hpp"
 #include "nbody/core/PhysicsWorld.hpp"
+#include "nbody/core/Presets.hpp"
 #include "nbody/core/Rk4Integrator.hpp"
 #include "nbody/core/Vec2.hpp"
 
@@ -193,4 +194,45 @@ TEST_CASE("world_no_collision_stable_pair") {
     }
     CHECK(world.mergeCount() == 0);
     CHECK(world.totalSteps() == 5000);
+}
+
+TEST_CASE("world_set_integrator_swaps_midflight") {
+    WorldConfig cfg;
+    cfg.g = 1.0;
+    cfg.softening = 0.0;
+    cfg.timeStep = 1.0 / 120.0;
+    PhysicsWorld world{cfg, makeIntegrator(IntegratorKind::Rk4)};
+    world.reset({
+        Body{1, 1.0, 0.05, Vec2{1.0, 0.0}, Vec2{0.0, 0.5}},
+        Body{2, 1.0, 0.05, Vec2{-1.0, 0.0}, Vec2{0.0, -0.5}},
+    });
+    for (int i = 0; i < 100; ++i) {
+        world.step();
+    }
+
+    const std::vector<Body> beforeStep = world.bodies();
+    world.setIntegrator(makeIntegrator(IntegratorKind::Euler));
+    world.step();
+
+    REQUIRE(world.integrator().name() == "euler");
+    REQUIRE(world.bodies().size() == beforeStep.size());
+    for (std::size_t i = 0; i < beforeStep.size(); ++i) {
+        CHECK(world.bodies()[i].position.x ==
+              Approx(beforeStep[i].position.x + beforeStep[i].velocity.x * cfg.timeStep)
+                  .margin(1e-12));
+        CHECK(world.bodies()[i].position.y ==
+              Approx(beforeStep[i].position.y + beforeStep[i].velocity.y * cfg.timeStep)
+                  .margin(1e-12));
+    }
+}
+
+TEST_CASE("world_set_timestep_changes_advance") {
+    PhysicsWorld world{inertConfig(), std::make_unique<EulerIntegrator>()};
+    world.reset({Body{1, 1.0, 0.1, Vec2{0.0, 0.0}, Vec2{0.0, 0.0}}});
+
+    world.setTimeStep(1.0 / 60.0);
+    world.step();
+
+    CHECK(world.simulationTime() == Approx(1.0 / 60.0).margin(1e-12));
+    CHECK(world.timeStep() == Approx(1.0 / 60.0).margin(0.0));
 }
