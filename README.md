@@ -64,8 +64,8 @@ softening: two-body and figure-eight $\varepsilon = 0$, solar-system
 $\varepsilon = 0.01$, random-cloud $\varepsilon = 0.1$; $G = 1$. Newton's
 third law is enforced pair-by-pair, so total momentum is conserved exactly.
 
-**Collisions.** Bodies merge inelastically on overlap: the survivor (lower
-id) takes $m = m_1 + m_2$, position at the center of mass,
+**Collisions.** Bodies merge inelastically on overlap: the more massive body
+survives (ties to the lower id), taking $m = m_1 + m_2$, position at the center of mass,
 $\vec{v} = (m_1 \vec{v}_1 + m_2 \vec{v}_2)/(m_1 + m_2)$, and
 $r = \sqrt{r_1^2 + r_2^2}$; the loser is erased.
 
