@@ -35,7 +35,7 @@ double totalEnergy(const std::vector<Body>& bodies, double g, double eps) {
 
 }  // namespace
 
-TEST_CASE("free_particle_straight_line") {
+TEST_CASE("euler_free_particle_straight_line") {
     // One isolated body: gravity contributes zero acceleration, so explicit
     // Euler must reproduce the straight-line trajectory exactly.
     EulerIntegrator euler;
@@ -54,7 +54,7 @@ TEST_CASE("free_particle_straight_line") {
     CHECK(bodies[0].velocity.y == Approx(0.5).epsilon(1e-12));
 }
 
-TEST_CASE("explicit_order_check") {
+TEST_CASE("euler_explicit_order_check") {
     // Pins explicit (not semi-implicit) ordering per plan section C.2:
     // position uses the OLD velocity; acceleration is evaluated at the OLD
     // positions. A semi-implicit step would update v first and move p.y with
@@ -78,7 +78,7 @@ TEST_CASE("explicit_order_check") {
     CHECK(light.velocity.x == 100.0 * (-1.0) * dt);
 }
 
-TEST_CASE("energy_drift_euler") {
+TEST_CASE("euler_energy_drift_euler") {
     // Documentation test for the spec's Euler-vs-RK4 demo: the two-body
     // circular preset (plan C.5: m=1 at (+-1, 0), v = (0, +-0.5), G=1,
     // eps=0; radii are irrelevant here) under 40000 explicit-Euler steps.

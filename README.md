@@ -24,15 +24,19 @@ The executable is `build/nbody`.
 | `--preset=` | `two-body` \| `solar-system` \| `random-cloud` \| `figure-eight` | `two-body` | Which scenario to load |
 | `--integrator=` | `euler` \| `rk4` | `rk4` | Integration scheme |
 | `--seed=` | integer | `42` | RNG seed (affects `random-cloud`) |
-| `--dt=` | float > 0 | preset's `1/120` | Override the fixed physics timestep |
+| `--dt=` | float in (0, 10] | preset's `1/120` | Override the fixed physics timestep |
 | `--headless=` | integer | `0` (windowed) | Run N steps, print one stats line, exit |
 | `--smoke` | — | off | Open a window for one frame, exit 0 |
 | `--help` | — | — | Print usage and exit 0 |
 
-Repeated flags: last occurrence wins.
+Repeated flags: last occurrence wins. `--headless=0` (the default) means
+windowed mode; when `--headless=<n>`, n > 0 takes precedence over `--smoke`
+if both are given. Parse errors and usage-on-error go to **stderr** and exit
+nonzero (2); `--help` usage goes to stdout and exits 0.
 
 Headless runs print a single checksum line, e.g.
-`steps=20000 time=166.667 bodies=5 merges=0 checksum=13.17`.
+`steps=20000 time=166.66666666667942 bodies=1 merges=149 checksum=1.299524206039838`
+(real output of `./build/nbody --headless=20000 --preset=random-cloud`).
 With the same `--seed`, that line is byte-identical across runs
 (verified: `--headless=100000 --preset=random-cloud --seed=42` twice,
 identical output and md5).
@@ -43,7 +47,7 @@ identical output and md5).
 | --- | --- |
 | `Esc` | Close the window |
 | `Space` | Pause / resume (rendering continues; a hung-upon frame never turns into a catch-up burst — the loop is clamped to 0.25 s of frame time and 30 steps per frame) |
-| `R` | Reset to the preset's initial bodies (reset assigns fresh monotonic ids, so body palette colors may remap) |
+| `R` | Reset to the preset's initial bodies (reset preserves the presets' caller-assigned ids 1..N, so body palette colors are stable across R; fresh monotonic ids apply only to bodies with id 0) |
 | Left-drag | Pan the camera |
 | Mouse wheel | Zoom anchored at the cursor position |
 

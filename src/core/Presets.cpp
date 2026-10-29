@@ -84,15 +84,10 @@ SimulationSetup randomCloud(std::uint32_t seed) {
 }
 
 // Chenciner-Montgomery figure-eight, G=1, eps=0, period T ~ 6.32591398.
-// RULING (task-7-report): plan C.5's velocity block (v2 = (vx, -vy), v3 =
-// (-0.93240737, 0)) is internally inconsistent — with p2 = -p1 and p3 = 0 it
-// forces nonzero angular momentum, so no trajectory from it is periodic. The
-// published velocity-symmetric form (all five C.5 digits kept verbatim):
-//   p1 = (0.9700436, -0.24308753), p2 = -p1, p3 = (0, 0)
-//   v1 = v2 = (0.4662036850, 0.4323657300)
-//   v3 = (-0.93240737, -0.86473146), with 0.86473146 = 2 x 0.4323657300
-// gives zero total momentum AND zero angular momentum and closes at T to
-// 0.07% at dt = T/2400 (verified against an independent integrator).
+// The figure-eight velocity block below deviates from plan C.5 (whose literal
+// v-block carries net angular momentum L ~ 0.839 with these positions); the
+// shipped L=0 mirrored variant is the published Chenciner-Montgomery
+// choreography — see the plan erratum note (2026-10-29).
 // k=0.1 is free per C.5 (equal masses) and keeps the merge threshold (0.2) a
 // factor 3.4 below the orbit's minimum pairwise separation (0.690, measured,
 // dt-converged) — the choreography must never merge.

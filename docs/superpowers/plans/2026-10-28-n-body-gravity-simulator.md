@@ -637,3 +637,12 @@ Inverse: $x_w = c_x + (p_x - W/2)/s$, $y_w = c_y + (H/2 - p_y)/s$. Zoom-at-curso
 ## Explicit non-goals (do not build)
 
 Barnes–Hut / any broadphase, elastic bouncing option, trails, more integrators (Verlet etc.), save/load state, config files, gamepad, multi-window. Each is a plausible junior "improvement" — adding any of them is a spec violation.
+
+## Erratum (2026-10-29)
+
+Section C.5's figure-eight velocity block (v1=(0.4662036850,0.4323657300),
+v3=(−0.93240737,0) with p3=(0,0)) yields net angular momentum L≈0.839 and
+does not close after one period. The implementation instead ships the L=0
+mirrored variant — p1=(x,−y) form, v1=v2=(vx,vy), v3=(−2vx,−2vy) — which
+closes to 0.07% per period (verified in review). The rest of this plan
+stands as written.

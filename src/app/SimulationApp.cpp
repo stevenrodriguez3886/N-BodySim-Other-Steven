@@ -110,8 +110,10 @@ void SimulationApp::handleEvents() {
             } else if (key->code == sf::Keyboard::Key::Space) {
                 paused_ = !paused_;  // rendering continues while paused
             } else if (key->code == sf::Keyboard::Key::R) {
-                // Note: reset() reassigns fresh monotonic ids in PhysicsWorld,
-                // so body palette colors (id % 8) may remap after R.
+                // PhysicsWorld::reset preserves caller-assigned nonzero ids,
+                // and the presets carry ids 1..N, so palette colors (id % 8)
+                // are stable across R. (Fresh monotonic ids apply only to
+                // bodies whose id is 0.)
                 world_.reset(presetBodies_);
                 accumulator_ = 0.0;
             }
@@ -201,7 +203,6 @@ void SimulationApp::render() {
 
     if (font_.has_value()) {  // HUD on screen too (belt over the title bar)
         sf::Text hud{*font_};  // SFML 3: ctor takes the Font, no default ctor
-        hud.setFont(*font_);
         hud.setCharacterSize(14U);
         hud.setFillColor(kHudColor);
         hud.setString(baseTitle_ + statsSuffix_);

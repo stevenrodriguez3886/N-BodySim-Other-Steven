@@ -57,13 +57,15 @@ bool parseSteps(std::string_view value, std::uint64_t& out) {
     return true;
 }
 
+// Usage errors go to stderr (stdout stays reserved for program output;
+// --help keeps printing usage on stdout with exit 0 in main).
 void fail(std::string_view arg, std::string_view reason) {
-    std::cout << "nbody: " << reason;
+    std::cerr << "nbody: " << reason;
     if (!arg.empty()) {
-        std::cout << " '" << arg << "'";
+        std::cerr << " '" << arg << "'";
     }
-    std::cout << '\n';
-    printUsage(std::cout);
+    std::cerr << '\n';
+    printUsage(std::cerr);
 }
 
 }  // namespace
@@ -145,8 +147,11 @@ std::optional<AppArgs> parseArgs(int argc, char** argv) {
             char* end = nullptr;
             const std::string copy(value);
             const double dt = std::strtod(copy.c_str(), &end);
+            // dt > 10 is a sanity bound, not physics: it prevents a silent
+            // NaN cascade in Release builds (Debug already asserts finiteness
+            // in PhysicsWorld::step).
             if (end != copy.c_str() + copy.size() || errno == ERANGE ||
-                !std::isfinite(dt) || dt <= 0.0) {
+                !std::isfinite(dt) || dt <= 0.0 || dt > 10.0) {
                 fail(value, "--dt must be a positive finite number");
                 return std::nullopt;
             }

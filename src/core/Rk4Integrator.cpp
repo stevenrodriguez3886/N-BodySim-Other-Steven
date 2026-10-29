@@ -21,6 +21,9 @@ void derivative(const std::vector<Body>& stage, const GravityField& gravity,
 }
 
 // stage = y + s * k, starting from the ORIGINAL y (never accumulates).
+// Stages carry only pos/vel/mass; radius/id are deliberately not propagated
+// (gravity uses mass/position only; collisions run on bodies_, not this
+// stage scratch).
 void stageFrom(const std::vector<Body>& y, const std::vector<Body>& k,
                double s, std::vector<Body>& stage) {
     for (std::size_t i = 0; i < y.size(); ++i) {
