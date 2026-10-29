@@ -34,7 +34,7 @@ target_compile_features(nbody_core PUBLIC cxx_std_17)
 # names its own SFML links below).
 add_library(nbody_app STATIC src/app/AppArgs.cpp src/app/HeadlessRunner.cpp
   src/app/Camera.cpp src/app/StepPlanning.cpp src/app/MenuBar.cpp
-  src/app/SimulationApp.cpp)
+  src/app/MenuModel.cpp src/app/SimulationApp.cpp)
 target_include_directories(nbody_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(nbody_app PUBLIC cxx_std_17)
 target_link_libraries(nbody_app PUBLIC nbody_core
