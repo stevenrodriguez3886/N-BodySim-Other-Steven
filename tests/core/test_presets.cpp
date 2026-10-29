@@ -1,0 +1,213 @@
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <iomanip>
+#include <sstream>
+#include <vector>
+
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+#include "nbody/core/Body.hpp"
+#include "nbody/core/PhysicsWorld.hpp"
+#include "nbody/core/Presets.hpp"
+#include "nbody/core/Vec2.hpp"
+
+using namespace nbody::core;
+using Catch::Approx;
+
+namespace {
+
+// runHeadless output is compared as formatted text in determinism checks, so
+// "identical" means bitwise-identical doubles, not merely == (-0.0 vs 0.0,
+// etc. would slip through operator==).
+bool bitsEqual(double a, double b) {
+    return std::memcmp(&a, &b, sizeof(double)) == 0;
+}
+
+bool bodiesBitwiseEqual(const std::vector<Body>& a,
+                        const std::vector<Body>& b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i].id != b[i].id || !bitsEqual(a[i].mass, b[i].mass) ||
+            !bitsEqual(a[i].radius, b[i].radius) ||
+            !bitsEqual(a[i].position.x, b[i].position.x) ||
+            !bitsEqual(a[i].position.y, b[i].position.y) ||
+            !bitsEqual(a[i].velocity.x, b[i].velocity.x) ||
+            !bitsEqual(a[i].velocity.y, b[i].velocity.y)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Pinned checksum order, mirroring HeadlessRunner: accumulate every body's x
+// component first, then every body's y, in document order. Fixing the order
+// keeps the sum's floating-point rounding deterministic, which is what the
+// determinism comparisons rely on.
+double checksumOf(const std::vector<Body>& bodies) {
+    double sum = 0.0;
+    for (const Body& b : bodies) {
+        sum += b.position.x;
+    }
+    for (const Body& b : bodies) {
+        sum += b.position.y;
+    }
+    return sum;
+}
+
+// runHeadless-style PhysicsWorld run (runHeadless itself lives in nbody_app,
+// out of reach for nbody_core_tests): RK4, `steps` steps, checksum rendered
+// with setprecision(17) exactly like the stats line.
+std::string runAndFormat(std::vector<Body> bodies, WorldConfig cfg,
+                        std::uint64_t steps) {
+    PhysicsWorld world{cfg, makeIntegrator(IntegratorKind::Rk4)};
+    world.reset(std::move(bodies));
+    for (std::uint64_t i = 0; i < steps; ++i) {
+        world.step();
+    }
+    std::ostringstream out;
+    out << std::setprecision(17) << checksumOf(world.bodies());
+    return out.str();
+}
+
+}  // namespace
+
+TEST_CASE("preset_two_body_orbit_period") {
+    // Mirrors rk4_orbit_period_return (Task 5) but through the PUBLIC preset
+    // path: if this passes, createPreset(TwoBody) is right, not just the
+    // hand-written test fixture.
+    SimulationSetup setup = createPreset(PresetName::TwoBody, 42);
+    REQUIRE(setup.bodies.size() == 2);
+
+    const std::vector<Body> start = setup.bodies;
+    const double tPeriod = 4.0 * M_PI;  // omega = 0.5 => T = 4*pi
+    setup.config.timeStep = tPeriod / 4000.0;
+
+    PhysicsWorld world{setup.config, makeIntegrator(IntegratorKind::Rk4)};
+    world.reset(std::move(setup.bodies));
+    for (int i = 0; i < 4000; ++i) {
+        world.step();
+    }
+    CHECK(world.mergeCount() == 0);
+
+    const auto& bodies = world.bodies();
+    REQUIRE(bodies.size() == 2);
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        CHECK(std::isfinite(bodies[i].position.x));
+        CHECK(std::isfinite(bodies[i].position.y));
+        CHECK(bodies[i].position.x ==
+              Approx(start[i].position.x).epsilon(0.02).margin(1e-9));
+        CHECK(bodies[i].position.y ==
+              Approx(start[i].position.y).epsilon(0.02).margin(1e-9));
+    }
+}
+
+TEST_CASE("preset_figure_eight_period") {
+    // Chenciner-Montgomery figure-eight (plan C.5), RK4 at dt = T/2400. The
+    // orbit is a rigidly periodic solution, but comparing rotation-free
+    // removes any residual phase drift: compare the MULTISET of the three
+    // pairwise distances at t=0 and t=T, sorted, within 5%.
+    SimulationSetup setup = createPreset(PresetName::FigureEight, 42);
+    REQUIRE(setup.bodies.size() == 3);
+
+    const auto pairwiseDistances = [](const std::vector<Body>& bodies) {
+        std::vector<double> d;
+        for (std::size_t i = 0; i < bodies.size(); ++i) {
+            for (std::size_t j = i + 1; j < bodies.size(); ++j) {
+                d.push_back(length(bodies[j].position - bodies[i].position));
+            }
+        }
+        std::sort(d.begin(), d.end());
+        return d;
+    };
+
+    const std::vector<double> startDists = pairwiseDistances(setup.bodies);
+    REQUIRE(startDists.size() == 3);
+
+    const double tPeriod = 6.32591398;  // C.5
+    setup.config.timeStep = tPeriod / 2400.0;
+
+    PhysicsWorld world{setup.config, makeIntegrator(IntegratorKind::Rk4)};
+    world.reset(std::move(setup.bodies));
+    for (int i = 0; i < 2400; ++i) {
+        world.step();
+    }
+    CHECK(world.mergeCount() == 0);
+    const auto& bodies = world.bodies();
+    REQUIRE(bodies.size() == 3);
+
+    const std::vector<double> endDists = pairwiseDistances(bodies);
+    for (std::size_t i = 0; i < 3; ++i) {
+        CHECK(endDists[i] == Approx(startDists[i]).epsilon(0.05));
+    }
+}
+
+TEST_CASE("preset_cloud_determinism") {
+    // Same seed => bitwise-identical body vectors ...
+    const SimulationSetup a = createPreset(PresetName::RandomCloud, 7);
+    const SimulationSetup b = createPreset(PresetName::RandomCloud, 7);
+    REQUIRE(!a.bodies.empty());
+    CHECK(bodiesBitwiseEqual(a.bodies, b.bodies));
+    CHECK(bitsEqual(a.config.g, b.config.g));
+    CHECK(bitsEqual(a.config.softening, b.config.softening));
+    CHECK(bitsEqual(a.config.timeStep, b.config.timeStep));
+
+    // ... and two 500-step world runs from them produce identical checksum
+    // text (the exact string the headless stats line would print).
+    CHECK(runAndFormat(a.bodies, a.config, 500) ==
+          runAndFormat(b.bodies, b.config, 500));
+}
+
+TEST_CASE("preset_solar_planets_bounded") {
+    // 10000 steps at the preset's default dt: every planet must stay within
+    // 2x its initial sun-distance (bound orbits, no ejections).
+    SimulationSetup setup = createPreset(PresetName::SolarSystem, 42);
+    REQUIRE(setup.bodies.size() == 5);
+    const std::vector<Body> start = setup.bodies;
+
+    PhysicsWorld world{setup.config, makeIntegrator(IntegratorKind::Rk4)};
+    world.reset(std::move(setup.bodies));
+    for (int i = 0; i < 10000; ++i) {
+        world.step();
+    }
+
+    const auto& bodies = world.bodies();
+    REQUIRE(bodies.size() == 5);
+    for (std::size_t i = 1; i < bodies.size(); ++i) {
+        const double r0 =
+            length(start[i].position - start[0].position);
+        const double r1 = length(bodies[i].position - bodies[0].position);
+        CHECK(std::isfinite(r1));
+        CHECK(r1 < 2.0 * r0);
+    }
+}
+
+TEST_CASE("preset_presets_valid") {
+    const std::pair<const char*, PresetName> all[] = {
+        {"two-body", PresetName::TwoBody},
+        {"solar-system", PresetName::SolarSystem},
+        {"random-cloud", PresetName::RandomCloud},
+        {"figure-eight", PresetName::FigureEight},
+    };
+    for (const auto& [label, name] : all) {
+        CAPTURE(label);
+        const SimulationSetup setup = createPreset(name, 42);
+        REQUIRE_FALSE(setup.bodies.empty());
+        for (std::size_t i = 0; i < setup.bodies.size(); ++i) {
+            CAPTURE(i);
+            CHECK(setup.bodies[i].mass > 0.0);
+            CHECK(setup.bodies[i].radius > 0.0);
+            CHECK(std::isfinite(setup.bodies[i].position.x));
+            CHECK(std::isfinite(setup.bodies[i].position.y));
+            CHECK(std::isfinite(setup.bodies[i].velocity.x));
+            CHECK(std::isfinite(setup.bodies[i].velocity.y));
+            // Presets assign ids 1..N in document order (PhysicsWorld::reset
+            // keeps caller-provided nonzero ids).
+            CHECK(setup.bodies[i].id == i + 1);
+        }
+    }
+}

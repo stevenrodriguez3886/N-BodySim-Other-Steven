@@ -24,17 +24,19 @@ endif()
 # nbody_core: real STATIC library (first source landed in Task 3).
 # nbody_core MUST NOT link anything (incl. SFML). Enforced: no link line here.
 add_library(nbody_core STATIC src/core/GravityField.cpp src/core/EulerIntegrator.cpp
-  src/core/Rk4Integrator.cpp src/core/PhysicsWorld.cpp)
+  src/core/Rk4Integrator.cpp src/core/PhysicsWorld.cpp src/core/Presets.cpp)
 target_include_directories(nbody_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(nbody_core PUBLIC cxx_std_17)
 
-# Task 1 scaffold: nbody_app is an empty placeholder (INTERFACE); its .cpp
-# sources join as later tasks land, at which point SFML moves to PRIVATE per
-# plan section A. INTERFACE targets can only carry INTERFACE link lines.
-add_library(nbody_app INTERFACE)
-target_include_directories(nbody_app INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(nbody_app INTERFACE nbody_core
-  SFML::Graphics SFML::Window SFML::System)
+# Task 1 scaffolded nbody_app as an INTERFACE placeholder; Task 7 converts it
+# to a real STATIC library. SFML is PRIVATE per plan section A: app consumers
+# get nbody_core transitively but no SFML link/include leak (the nbody exe
+# names its own SFML links below).
+add_library(nbody_app STATIC src/app/AppArgs.cpp src/app/HeadlessRunner.cpp)
+target_include_directories(nbody_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(nbody_app PUBLIC cxx_std_17)
+target_link_libraries(nbody_app PUBLIC nbody_core
+  PRIVATE SFML::Graphics SFML::Window SFML::System)
 
 add_executable(nbody src/main.cpp)
 target_link_libraries(nbody PRIVATE nbody_app nbody_core
