@@ -15,6 +15,7 @@ add_executable(nbody_core_tests
   core/test_gravity.cpp
   core/test_euler.cpp
   core/test_rk4.cpp
+  core/test_world.cpp
 )
 target_link_libraries(nbody_core_tests PRIVATE nbody_core Catch2::Catch2WithMain)
 catch_discover_tests(nbody_core_tests)
