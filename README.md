@@ -12,7 +12,7 @@ unless a system SFML 3 is found; audio is never built — `SFML_BUILD_AUDIO=OFF`
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
-ctest --test-dir build        # 44 tests
+ctest --test-dir build        # 62 tests
 ```
 
 The executable is `build/nbody`.
@@ -45,14 +45,45 @@ identical output and md5).
 
 | Input | Effect |
 | --- | --- |
-| `Esc` | Close the window |
+| `Esc` | Close an open dropdown; otherwise close the window |
 | `Space` | Pause / resume (rendering continues; a hung-upon frame never turns into a catch-up burst — the loop is clamped to 0.25 s of frame time and 30 steps per frame) |
-| `R` | Reset to the preset's initial bodies (reset preserves the presets' caller-assigned ids 1..N, so body palette colors are stable across R; fresh monotonic ids apply only to bodies with id 0) |
+| `R` | Restart from the current Preset and Random seed menu options, not the launch options |
+| Preset | Click the header to choose one of four presets |
+| Integrator | Click the header to choose RK4 or Euler |
+| Physics | Click the header to choose a time step or restart the scene |
+| Random seed | Click the header to adjust the seed |
 | Left-drag | Pan the camera |
 | Mouse wheel | Zoom anchored at the cursor position |
 
 The live FPS / UPS / body count / sim time are shown in the title bar (and
 on-screen when a system font is loadable).
+
+## In-window menu
+
+The layout-A menu is a top bar with Preset, Integrator, Physics, and Random
+seed groups. Click a group header to open its dropdown, then click an option;
+click outside the dropdown to close it. The fixed-width headers can clip past
+the right edge in narrow windows.
+
+Changes apply immediately while the simulation is running. While paused,
+changes are staged and shown in a pending chip. Resuming applies the pending
+choices together in preset, integrator, time-step, then seed order; the last
+choice made in each group wins.
+
+| Group | While running | While paused |
+| --- | --- | --- |
+| Preset | Switches scenes, resets simulation time, and refits the camera | Staged until resume |
+| Integrator | Switches integrator without changing the current simulation state | Staged until resume |
+| Physics time step | Applies from the next simulation step | Staged until resume |
+| Random seed | Regenerates random-cloud immediately, preserving the camera; for other presets, takes effect on the next random-cloud load | Staged until resume |
+
+Physics offers time steps of `1/30`, `1/60`, `1/120`, `1/240`, and `1/480`,
+plus a **Restart scene** action that uses the currently selected preset and
+seed. The `R` key uses those same current menu options. If `--dt` sets a value
+outside the menu list, the Physics header shows that raw value and no dropdown
+choice is ticked. The seed stepper changes the value by one and does not go
+below zero. Menu navigation is mouse-only; keyboard menu navigation is not
+supported.
 
 ## Physics notes
 
