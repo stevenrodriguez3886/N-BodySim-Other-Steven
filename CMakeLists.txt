@@ -21,14 +21,11 @@ if(NOT SFML_FOUND)
   FetchContent_MakeAvailable(SFML)
 endif()
 
-# Task 1 scaffold: nbody_core is an empty placeholder (header dir only, so an
-# INTERFACE target; the PUBLIC keyword is rejected on INTERFACE targets, hence
-# set_property). Becomes a normal add_library with .cpp sources in Task 2.
-add_library(nbody_core INTERFACE)
-set_property(TARGET nbody_core PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-  ${CMAKE_CURRENT_SOURCE_DIR}/include)
-set_property(TARGET nbody_core PROPERTY INTERFACE_COMPILE_FEATURES cxx_std_17)
-# nbody_core MUST NOT link or include SFML. Enforced: no SFML link line here.
+# nbody_core: real STATIC library (first source landed in Task 3).
+# nbody_core MUST NOT link anything (incl. SFML). Enforced: no link line here.
+add_library(nbody_core STATIC src/core/GravityField.cpp)
+target_include_directories(nbody_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(nbody_core PUBLIC cxx_std_17)
 
 # Task 1 scaffold: nbody_app is an empty placeholder (INTERFACE); its .cpp
 # sources join as later tasks land, at which point SFML moves to PRIVATE per
