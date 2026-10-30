@@ -106,8 +106,11 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    // --bodies applies to random-cloud only (clamped [2,2000] by core too).
     nbody::core::SimulationSetup setup =
-        nbody::core::createPreset(args->preset, args->seed);
+        args->preset == nbody::core::PresetName::RandomCloud
+            ? nbody::core::randomCloud(args->seed, args->bodies)
+            : nbody::core::createPreset(args->preset, args->seed);
     if (args->dt.has_value()) {
         setup.config.timeStep = *args->dt;
     }
@@ -129,7 +132,11 @@ int main(int argc, char** argv) {
         return 1;
     }
     const std::string title = windowTitle(*args);
-    nbody::app::SimulationApp app{std::move(setup), args->preset, args->seed,
-                                  args->integrator, title};
+    // The windowed seed editor still stores u32 (MenuState seed widens to
+    // int64 with the option-menu tasks); the scene itself is already built
+    // from the full int64 seed via the setup above.
+    nbody::app::SimulationApp app{
+        std::move(setup), args->preset,
+        static_cast<std::uint32_t>(args->seed), args->integrator, title};
     return app.run();
 }

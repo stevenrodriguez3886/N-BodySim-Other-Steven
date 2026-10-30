@@ -32,16 +32,47 @@ bool parseUnsignedLongLong(std::string_view value,
     return true;
 }
 
-// --seed: overflow CLAMPS to UINT32_MAX (plan Task 7 edge case: range check
-// on the strtoul result rather than silent wraparound).
-bool parseSeed(std::string_view value, std::uint32_t& out) {
+// --seed: signed int64 (spec D.3), leading '-' allowed. Digits must be fully
+// consumed; overflow CLAMPS to the int64 bounds (range check on the strtoll
+// result rather than silent wraparound, per the Task 7 edge-case rule).
+bool parseSeed(std::string_view value, std::int64_t& out) {
+    if (value.empty()) {
+        return false;
+    }
+    std::size_t digits = value[0] == '-' ? 1U : 0U;
+    if (digits == 1U && value.size() == 1U) {
+        return false;  // bare "-"
+    }
+    if (value[digits] < '0' || value[digits] > '9') {
+        return false;  // strtoll would eat junk like "-x" or "+5"
+    }
+    errno = 0;
+    char* end = nullptr;
+    const std::string copy(value);
+    const long long v = std::strtoll(copy.c_str(), &end, 10);
+    if (end != copy.c_str() + copy.size()) {
+        return false;  // trailing junk, e.g. "12abc"
+    }
+    if (errno == ERANGE) {
+        out = value[0] == '-' ? INT64_MIN : INT64_MAX;
+    } else {
+        out = static_cast<std::int64_t>(v);
+    }
+    return true;
+}
+
+// --bodies: digits, clamped to [2, 2000] (spec D.3; overflow clamps high).
+bool parseBodies(std::string_view value, std::uint32_t& out) {
     unsigned long long v = 0;
     bool overflow = false;
     if (!parseUnsignedLongLong(value, v, overflow)) {
         return false;
     }
-    out = (overflow || v > UINT32_MAX) ? UINT32_MAX
-                                       : static_cast<std::uint32_t>(v);
+    if (overflow || v > 2000ULL) {
+        out = 2000U;
+    } else {
+        out = v < 2ULL ? 2U : static_cast<std::uint32_t>(v);
+    }
     return true;
 }
 
@@ -74,7 +105,10 @@ void printUsage(std::ostream& out) {
     out << "usage: nbody [options]\n"
         << "  --preset=<two-body|solar-system|random-cloud|figure-eight>\n"
         << "  --integrator=<euler|rk4>\n"
-        << "  --seed=<int>            seed for random-cloud (default 42)\n"
+        << "  --seed=<int64>          seed for random-cloud (default 42,\n"
+        << "                          leading '-' allowed)\n"
+        << "  --bodies=<int>          random-cloud body count [2,2000] "
+        << "(default 150)\n"
         << "  --dt=<float>            override the preset's fixed timestep\n"
         << "  --headless=<int>        run N physics steps, print stats, exit\n"
         << "  --smoke                 open a window for one frame, exit 0\n"
@@ -135,6 +169,11 @@ std::optional<AppArgs> parseArgs(int argc, char** argv) {
         } else if (name == "seed") {
             if (!parseSeed(value, args.seed)) {
                 fail(value, "invalid --seed value");
+                return std::nullopt;
+            }
+        } else if (name == "bodies") {
+            if (!parseBodies(value, args.bodies)) {
+                fail(value, "invalid --bodies value");
                 return std::nullopt;
             }
         } else if (name == "headless") {

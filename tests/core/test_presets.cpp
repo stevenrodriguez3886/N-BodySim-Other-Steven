@@ -343,3 +343,274 @@ TEST_CASE("preset_presets_valid") {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Task 1 (preset-option-menus): signed seeds + per-preset option parameters.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Literal 500-step RK4 checksums captured from the pre-change binary (main @
+// 7ca1dfa) via `nbody --preset=<p> --headless=500` -- the same stats line
+// runAndFormat() emulates. These pin the DEFAULT setups byte-for-byte: any
+// drift in the new option parameters' default paths fails here.
+constexpr const char* kPinCloudSeed42 = "44.930828866170515";
+constexpr const char* kPinCloudSeed7 = "-27.350832960581805";
+constexpr const char* kPinTwoBody = "0";
+constexpr const char* kPinFigureEight = "3.8857805861880479e-15";
+constexpr const char* kPinSolar = "-138.09795158656254";
+
+}  // namespace
+
+TEST_CASE("preset_checksum_pins_default_paths") {
+    // Anchor regressions (spec D.3/D.8): the no-option call paths must stay
+    // bit-identical to main. The 100k-step cloud anchor
+    // (5.5936610862797043) is verified against the built binary in the task
+    // report; these 500-step pins cover the same streams in CI.
+    const SimulationSetup cloud42 = randomCloud(42);
+    CHECK(runAndFormat(cloud42.bodies, cloud42.config, 500) ==
+          kPinCloudSeed42);
+    const SimulationSetup cloud7 = randomCloud(7);
+    CHECK(runAndFormat(cloud7.bodies, cloud7.config, 500) ==
+          kPinCloudSeed7);
+    const SimulationSetup two = twoBody(42);
+    CHECK(runAndFormat(two.bodies, two.config, 500) == kPinTwoBody);
+    // The two-body checksum is 0 at ANY separation (mirror symmetry), so the
+    // string pin alone cannot see geometry drift: pin the literals bitwise.
+    CHECK(bitsEqual(two.bodies[0].position.x, 1.0));
+    CHECK(bitsEqual(two.bodies[0].position.y, 0.0));
+    CHECK(bitsEqual(two.bodies[0].velocity.y, 0.5));
+    CHECK(bitsEqual(two.bodies[1].position.x, -1.0));
+    CHECK(bitsEqual(two.bodies[1].velocity.y, -0.5));
+    const SimulationSetup fig = figureEight(42);
+    CHECK(runAndFormat(fig.bodies, fig.config, 500) ==
+          kPinFigureEight);
+    // Figure-eight pin likewise: literal choreography coordinates bitwise.
+    CHECK(bitsEqual(fig.bodies[0].position.x, 0.9700436));
+    CHECK(bitsEqual(fig.bodies[0].position.y, -0.24308753));
+    CHECK(bitsEqual(fig.bodies[2].velocity.x, -2.0 * 0.4662036850));
+    CHECK(bitsEqual(fig.bodies[2].velocity.y, -2.0 * 0.4323657300));
+    const SimulationSetup solar = solarSystem(42);
+    CHECK(runAndFormat(solar.bodies, solar.config, 500) ==
+          kPinSolar);
+}
+
+TEST_CASE("preset_seed_fold_law") {
+    // Spec D.3 fold: seed in [0, 2^32) maps to itself (historical streams
+    // unchanged); everything else goes through the splitmix64 fold.
+    CHECK(foldSeed(0) == 0U);
+    CHECK(foldSeed(42) == 42U);
+    CHECK(foldSeed(7) == 7U);
+    CHECK(foldSeed(INT64_C(4294967295)) == 4294967295U);
+    // Out-of-range seeds fold deterministically (pure function).
+    CHECK(foldSeed(-1) == foldSeed(-1));
+    CHECK(foldSeed(INT64_C(1099511627776)) ==
+          foldSeed(INT64_C(1099511627776)));
+    // 2^32 is the first folding input; it must not map to itself (0) — the
+    // fold is what keeps mt19937 seeds in u32 range.
+    CHECK(foldSeed(INT64_C(4294967296)) != 0U);
+}
+
+TEST_CASE("preset_seed_negative_and_big_determinism") {
+    // createPreset(RandomCloud, -1) twice equal, != seed 1 (brief).
+    const SimulationSetup a = createPreset(PresetName::RandomCloud, -1);
+    const SimulationSetup b = createPreset(PresetName::RandomCloud, -1);
+    REQUIRE(!a.bodies.empty());
+    CHECK(bodiesBitwiseEqual(a.bodies, b.bodies));
+    const SimulationSetup one = createPreset(PresetName::RandomCloud, 1);
+    CHECK(!bodiesBitwiseEqual(a.bodies, one.bodies));
+
+    // A big seed (2^40) is deterministic across repeated calls too.
+    const SimulationSetup c =
+        createPreset(PresetName::RandomCloud, INT64_C(1099511627776));
+    const SimulationSetup d =
+        createPreset(PresetName::RandomCloud, INT64_C(1099511627776));
+    CHECK(bodiesBitwiseEqual(c.bodies, d.bodies));
+
+    // Folding law: the 500-step run of a folded seed equals the run of its
+    // folded u32 (the engine really is mt19937(foldSeed(seed))).
+    CHECK(runAndFormat(a.bodies, a.config, 500) ==
+          runAndFormat(randomCloud(static_cast<std::int64_t>(foldSeed(-1)))
+                           .bodies,
+                       a.config, 500));
+    CHECK(runAndFormat(c.bodies, c.config, 500) ==
+          runAndFormat(
+              randomCloud(static_cast<std::int64_t>(
+                  foldSeed(INT64_C(1099511627776))))
+                  .bodies,
+              c.config, 500));
+}
+
+TEST_CASE("preset_cloud_prefix_contract") {
+    // First 150 of (s, 2000) == all of (s, 150), bitwise: the shared RNG
+    // stream is consumed in the same per-body order regardless of count.
+    const SimulationSetup big = randomCloud(7, 2000);
+    const SimulationSetup small = randomCloud(7, 150);
+    REQUIRE(big.bodies.size() == 2000);
+    REQUIRE(small.bodies.size() == 150);
+    CHECK(bodiesBitwiseEqual(
+        {big.bodies.begin(), big.bodies.begin() + 150}, small.bodies));
+    // Default count stays 150 and matches the explicit-count call bitwise.
+    const SimulationSetup def = randomCloud(7);
+    CHECK(bodiesBitwiseEqual(def.bodies, small.bodies));
+    // The contract also holds at other counts: first 100 of (7, 500).
+    CHECK(bodiesBitwiseEqual(
+        {big.bodies.begin(), big.bodies.begin() + 100},
+        randomCloud(7, 100).bodies));
+}
+
+TEST_CASE("preset_cloud_count_clamps") {
+    CHECK(randomCloud(7, 0).bodies.size() == 2);
+    CHECK(randomCloud(7, 1).bodies.size() == 2);
+    CHECK(randomCloud(7, 2).bodies.size() == 2);
+    CHECK(randomCloud(7, 2000).bodies.size() == 2000);
+    CHECK(randomCloud(7, 2001).bodies.size() == 2000);
+    CHECK(randomCloud(7, 4000000000U).bodies.size() == 2000);
+    // Clamped-to-2 output is a valid prefix: bodies[0..1] of count 2000.
+    const SimulationSetup big = randomCloud(7, 2000);
+    CHECK(bodiesBitwiseEqual(randomCloud(7, 0).bodies,
+                             {big.bodies.begin(), big.bodies.begin() + 2}));
+}
+
+TEST_CASE("preset_two_body_separation_scale") {
+    const SimulationSetup def = twoBody(0);
+    REQUIRE(def.bodies.size() == 2);
+
+    // twoBody(sep=20) positions == twoBody() positions * 2 exactly.
+    const SimulationSetup dbl = twoBody(0, 20.0);
+    REQUIRE(dbl.bodies.size() == 2);
+    for (std::size_t i = 0; i < 2; ++i) {
+        CHECK(bitsEqual(dbl.bodies[i].position.x,
+                        def.bodies[i].position.x * 2.0));
+        CHECK(bitsEqual(dbl.bodies[i].position.y,
+                        def.bodies[i].position.y * 2.0));
+        // Masses/radii/ids untouched by scaling.
+        CHECK(bitsEqual(dbl.bodies[i].mass, def.bodies[i].mass));
+        CHECK(bitsEqual(dbl.bodies[i].radius, def.bodies[i].radius));
+        CHECK(dbl.bodies[i].id == def.bodies[i].id);
+    }
+    CHECK(dbl.bodies[0].position.x == 2.0);
+    CHECK(dbl.bodies[1].position.x == -2.0);
+
+    // Circular at the new scale: per-body v = sqrt(G*m/(4s)), s = sep/10.
+    const double vCirc = 0.5 / std::sqrt(2.0);
+    for (const Body& b : dbl.bodies) {
+        CHECK(length(b.velocity) == Approx(vCirc).epsilon(1e-12));
+    }
+    CHECK(std::fabs(dot(dbl.bodies[0].position, dbl.bodies[0].velocity)) <
+          1e-9);  // tangential
+    CHECK(dbl.bodies[0].velocity.y > 0.0);  // same orientation as default
+
+    // Default path is bit-identical to the pre-option call (createPreset).
+    CHECK(bodiesBitwiseEqual(def.bodies,
+                             createPreset(PresetName::TwoBody, 0).bodies));
+}
+
+TEST_CASE("preset_two_body_hyperbolic") {
+    const SimulationSetup orb = twoBody(0);
+    const SimulationSetup hyp = twoBody(0, 10.0, true);
+    REQUIRE(hyp.bodies.size() == 2);
+
+    // Same geometry, equal masses; |v| = 1.6x circular, inbound fly-by.
+    for (std::size_t i = 0; i < 2; ++i) {
+        CHECK(bitsEqual(hyp.bodies[i].position.x, orb.bodies[i].position.x));
+        CHECK(bitsEqual(hyp.bodies[i].position.y, orb.bodies[i].position.y));
+        CHECK(bitsEqual(hyp.bodies[i].mass, orb.bodies[i].mass));
+        // 1.6 * 0.5: exact in binary (0.5 scales cleanly).
+        CHECK(length(hyp.bodies[i].velocity) ==
+              Approx(1.6 * length(orb.bodies[i].velocity)).epsilon(1e-12));
+    }
+    // Same directions as the orbit variant (tangential, CCW pair).
+    CHECK(hyp.bodies[0].velocity.y > 0.0);
+    CHECK(hyp.bodies[1].velocity.y < 0.0);
+
+    // Unbound: E = KE + PE > 0 (1.6^2 = 2.56 > escape ratio 2 for equal
+    // masses).
+    const double ke = 0.5 * hyp.bodies[0].mass *
+                          dot(hyp.bodies[0].velocity, hyp.bodies[0].velocity) +
+                      0.5 * hyp.bodies[1].mass *
+                          dot(hyp.bodies[1].velocity, hyp.bodies[1].velocity);
+    const double d =
+        length(hyp.bodies[1].position - hyp.bodies[0].position);
+    const double pe = -hyp.config.g * hyp.bodies[0].mass *
+                      hyp.bodies[1].mass / d;
+    CHECK(ke + pe > 0.0);
+
+    // Scaling composes: hyperbolic at sep=20 keeps positions x2 and the
+    // 1.6x rule at the scaled circular speed.
+    const SimulationSetup hyp20 = twoBody(0, 20.0, true);
+    CHECK(bitsEqual(hyp20.bodies[0].position.x, 2.0));
+    CHECK(length(hyp20.bodies[0].velocity) ==
+          Approx(1.6 * 0.5 / std::sqrt(2.0)).epsilon(1e-12));
+}
+
+TEST_CASE("preset_figure_eight_scale") {
+    const SimulationSetup def = figureEight(0);
+    REQUIRE(def.bodies.size() == 3);
+    // Default == the classic solution (createPreset path, bitwise).
+    CHECK(bodiesBitwiseEqual(
+        def.bodies, createPreset(PresetName::FigureEight, 0).bodies));
+
+    // figureEight(scale=3): positions x3, velocities x sqrt(3) (spec D.2
+    // self-similarity rule), bitwise against the same scalar ops.
+    const SimulationSetup s3 = figureEight(0, 3.0);
+    REQUIRE(s3.bodies.size() == 3);
+    const double k = std::sqrt(3.0);
+    for (std::size_t i = 0; i < 3; ++i) {
+        CAPTURE(i);
+        CHECK(bitsEqual(s3.bodies[i].position.x,
+                        def.bodies[i].position.x * 3.0));
+        CHECK(bitsEqual(s3.bodies[i].position.y,
+                        def.bodies[i].position.y * 3.0));
+        CHECK(bitsEqual(s3.bodies[i].velocity.x,
+                        def.bodies[i].velocity.x * k));
+        CHECK(bitsEqual(s3.bodies[i].velocity.y,
+                        def.bodies[i].velocity.y * k));
+        CHECK(bitsEqual(s3.bodies[i].mass, def.bodies[i].mass));
+        CHECK(bitsEqual(s3.bodies[i].radius, def.bodies[i].radius));
+    }
+}
+
+TEST_CASE("preset_solar_planet_count_and_pluto") {
+    const SimulationSetup full = solarSystem(0);
+    REQUIRE(full.bodies.size() == 9);
+
+    // Inside-out prefix: planets=3 == sun + first 3 planets, bitwise.
+    const SimulationSetup p3 = solarSystem(0, 3);
+    REQUIRE(p3.bodies.size() == 4);
+    CHECK(bodiesBitwiseEqual(p3.bodies,
+                             {full.bodies.begin(), full.bodies.begin() + 4}));
+    for (std::size_t i = 0; i < 4; ++i) {
+        CHECK(p3.bodies[i].id == i + 1);  // ids stay 1..N
+    }
+
+    // 0 = sun only; -1 clamps to 0; 9 clamps to 8 (== default, bitwise).
+    CHECK(solarSystem(0, 0).bodies.size() == 1);
+    CHECK(bodiesBitwiseEqual(solarSystem(0, -1).bodies,
+                             solarSystem(0, 0).bodies));
+    CHECK(bodiesBitwiseEqual(solarSystem(0, 9).bodies, full.bodies));
+
+    // Pluto: extra body id 10 at a ~= 200, circular v = sqrt(g*M/a), only
+    // when planets == 8.
+    const SimulationSetup pl = solarSystem(0, 8, true);
+    REQUIRE(pl.bodies.size() == 10);
+    const Body& pluto = pl.bodies[9];
+    CHECK(pluto.id == 10);
+    CHECK(pluto.mass == Approx(1.0e-5).epsilon(1e-12));
+    const double r = length(pluto.position);
+    CHECK(r == Approx(200.0).epsilon(1e-9));
+    const double vCirc = std::sqrt(pl.config.g * pl.bodies[0].mass / 200.0);
+    CHECK(length(pluto.velocity) == Approx(vCirc).epsilon(1e-12));
+    CHECK(std::fabs(dot(pluto.position, pluto.velocity)) < 1e-9 * 200.0 *
+              vCirc);                                           // tangential
+    CHECK(pluto.position.x * pluto.velocity.y -
+              pluto.position.y * pluto.velocity.x > 0.0);  // prograde, CCW
+    // First 9 bodies unchanged by the flag; 9 planets total (8 + Pluto).
+    CHECK(bodiesBitwiseEqual({pl.bodies.begin(), pl.bodies.begin() + 9},
+                             full.bodies));
+
+    // planets < 8: the pluto flag is ignored (independent row, no-op).
+    CHECK(bodiesBitwiseEqual(solarSystem(0, 3, true).bodies, p3.bodies));
+    // 9 clamps to 8 first, so pluto still applies there.
+    CHECK(bodiesBitwiseEqual(solarSystem(0, 9, true).bodies, pl.bodies));
+}

@@ -16,17 +16,45 @@ double radiusFor(double mass, double k) {
     return k * std::sqrt(mass);
 }
 
-// G=1, eps=0; m=1 at (+-1, 0), v=(0, +-0.5): exact circular orbit with
-// r_orbit=1, v_rel=1, period T = 4*pi. k=0.1.
-SimulationSetup twoBody() {
+// Splitmix64 finalizer (Steele et al.) over the two's-complement bits of the
+// int64 seed; high 32 bits returned as the mt19937 seed. Only reached for
+// seeds OUTSIDE [0, 2^32) — small non-negative seeds pass through unchanged
+// (see foldSeed), which is what keeps every historical stream intact.
+std::uint32_t splitmix64Fold(std::int64_t seed) {
+    std::uint64_t z = static_cast<std::uint64_t>(seed);
+    z += UINT64_C(0x9E3779B97F4A7C15);
+    z = (z ^ (z >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)) * UINT64_C(0x94D049BB133111EB);
+    z = z ^ (z >> 31);
+    return static_cast<std::uint32_t>(z >> 32);
+}
+
+}  // namespace
+
+std::uint32_t foldSeed(std::int64_t seed) {
+    // Identity on the historical window: 0 <= seed < 2^32 -> uint32(seed).
+    if (seed >= 0 && seed < INT64_C(4294967296)) {
+        return static_cast<std::uint32_t>(seed);
+    }
+    return splitmix64Fold(seed);
+}
+
+// G=1, eps=0; m=1 at (+-s, 0), v=(0, +-0.5/sqrt(s)) with s = separation/10:
+// s=1 (default separation 10) is today's exact circular orbit (r_orbit=1,
+// v_rel=1, period T = 4*pi); larger s is the same orbit scaled (circular
+// speed sqrt(G*m/(4s)) follows from the two-body scaling law). hyperbolic =
+// same geometry, |v| = 1.6x circular: unbound (1.6^2 > 2).
+SimulationSetup twoBody(std::int64_t /*seed*/, double separation,
+                        bool hyperbolic) {
+    const double s = separation / 10.0;
+    const double v = (hyperbolic ? 1.6 : 1.0) * (0.5 / std::sqrt(s));
     WorldConfig cfg;
     cfg.g = 1.0;
     cfg.softening = 0.0;
     return SimulationSetup{
         {
-            Body{1, 1.0, radiusFor(1.0, 0.1), Vec2{1.0, 0.0}, Vec2{0.0, 0.5}},
-            Body{2, 1.0, radiusFor(1.0, 0.1), Vec2{-1.0, 0.0},
-                 Vec2{0.0, -0.5}},
+            Body{1, 1.0, radiusFor(1.0, 0.1), Vec2{s, 0.0}, Vec2{0.0, v}},
+            Body{2, 1.0, radiusFor(1.0, 0.1), Vec2{-s, 0.0}, Vec2{0.0, -v}},
         },
         cfg};
 }
@@ -41,7 +69,17 @@ SimulationSetup twoBody() {
 // radius is NOT visually capped (draw-time floors are Task 2's job).
 // Rocky-planet masses are floored into the spec band (real ratios would put
 // them ~3 orders of magnitude below it); ordering follows reality.
-SimulationSetup solarSystem() {
+// planetCount (spec D.2/D.3) is an inside-out prefix of the table, clamped
+// [0, 8]; pluto adds body id 10 (a ~= 200, circular, prograde like the
+// siblings) only when the CLAMPED count == 8, else it is ignored.
+SimulationSetup solarSystem(std::int64_t /*seed*/, int planetCount,
+                            bool pluto) {
+    if (planetCount < 0) {
+        planetCount = 0;
+    } else if (planetCount > 8) {
+        planetCount = 8;
+    }
+    const bool addPluto = pluto && planetCount == 8;
     WorldConfig cfg;
     cfg.g = 1.0;
     cfg.softening = 0.01;
@@ -69,7 +107,8 @@ SimulationSetup solarSystem() {
     };
 
     std::vector<Body> bodies;
-    bodies.reserve(1 + std::size(kPlanets));
+    bodies.reserve(1 + static_cast<std::size_t>(planetCount) +
+                    (addPluto ? 1U : 0U));
 
     Body sun{1, kSunMass, radiusFor(kSunMass, 0.05), Vec2{0.0, 0.0},
             Vec2{0.0, 0.0}};
@@ -78,7 +117,8 @@ SimulationSetup solarSystem() {
     bodies.push_back(sun);
 
     std::uint64_t id = 2;
-    for (const PlanetDef& p : kPlanets) {
+    for (int i = 0; i < planetCount; ++i) {
+        const PlanetDef& p = kPlanets[static_cast<std::size_t>(i)];
         const double theta = p.angleDeg * kDegToRad;
         const double v = std::sqrt(cfg.g * kSunMass / p.a);
         Body body{id++, p.mass, radiusFor(p.mass, 0.05),
@@ -89,27 +129,47 @@ SimulationSetup solarSystem() {
         body.appearance.ring = p.ring;
         bodies.push_back(body);
     }
+    if (addPluto) {
+        // Spec D.2: Pluto at a ~= 200, circular v = sqrt(G*M_sun/a), prograde
+        // (2D: no inclination), dim brown, mass ~1e-5, k=0.05 radius law.
+        constexpr double kPlutoA = 200.0;
+        constexpr double kPlutoMass = 1.0e-5;
+        const double v = std::sqrt(cfg.g * kSunMass / kPlutoA);
+        Body plutoBody{id++, kPlutoMass, radiusFor(kPlutoMass, 0.05),
+                       Vec2{kPlutoA, 0.0}, Vec2{0.0, v}};
+        plutoBody.appearance.color = 0x8A6A52u;  // dim brown
+        bodies.push_back(plutoBody);
+    }
     return SimulationSetup{std::move(bodies), cfg};
 }
 
-// N=150 Gaussian cloud, fully seeded (plan C.5): positions ~ N(0, 6) per
-// axis (isotropic => disc), velocities ~ N(0, 0.2), mass ~ U[0.1, 1.0],
-// k=0.08. The per-body sampling ORDER below (px, py, vx, vy, m) is part of
-// the seeded-determinism contract: never reshuffle it.
-SimulationSetup randomCloud(std::uint32_t seed) {
+// Gaussian cloud, fully seeded (plan C.5): positions ~ N(0, 6) per axis
+// (isotropic => disc), velocities ~ N(0, 0.2), mass ~ U[0.1, 1.0], k=0.08.
+// The per-body sampling ORDER below (px, py, vx, vy, m) is part of the
+// seeded-determinism contract: never reshuffle it. It also gives the prefix
+// contract (spec D.3): body i consumes the stream identically for any total
+// count, so the first N of (seed, M) are bitwise all of (seed, N).
+// count clamps to [2, 2000] (spec D.3); the seed reaches mt19937 through
+// foldSeed, so historical <2^32 streams are unchanged.
+SimulationSetup randomCloud(std::int64_t seed, std::uint32_t count) {
     WorldConfig cfg;
     cfg.g = 1.0;
     cfg.softening = 0.1;
 
-    std::mt19937 rng(seed);  // seeded, never rand(), never time-based
+    if (count < 2U) {
+        count = 2U;
+    } else if (count > 2000U) {
+        count = 2000U;
+    }
+
+    std::mt19937 rng(foldSeed(seed));  // seeded, never rand(), never time
     std::normal_distribution<double> posDist(0.0, 6.0);
     std::normal_distribution<double> velDist(0.0, 0.2);
     std::uniform_real_distribution<double> massDist(0.1, 1.0);
 
-    constexpr int kCount = 150;
     std::vector<Body> bodies;
-    bodies.reserve(kCount);
-    for (int i = 0; i < kCount; ++i) {
+    bodies.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
         const double px = posDist(rng);
         const double py = posDist(rng);
         const double vx = velDist(rng);
@@ -130,7 +190,9 @@ SimulationSetup randomCloud(std::uint32_t seed) {
 // k=0.1 is free per C.5 (equal masses) and keeps the merge threshold (0.2) a
 // factor 3.4 below the orbit's minimum pairwise separation (0.690, measured,
 // dt-converged) — the choreography must never merge.
-SimulationSetup figureEight() {
+// scale (spec D.2): positions xk, velocities xsqrt(k); 1.0 = today, bitwise.
+SimulationSetup figureEight(std::int64_t /*seed*/, double scale) {
+    const double vk = std::sqrt(scale);
     WorldConfig cfg;
     cfg.g = 1.0;
     cfg.softening = 0.0;
@@ -141,28 +203,26 @@ SimulationSetup figureEight() {
     constexpr double kVY = 0.4323657300;
     return SimulationSetup{
         {
-            Body{1, 1.0, radiusFor(1.0, 0.1), Vec2{kX, -kY},
-                 Vec2{kVX, kVY}},
-            Body{2, 1.0, radiusFor(1.0, 0.1), Vec2{-kX, kY},
-                 Vec2{kVX, kVY}},
+            Body{1, 1.0, radiusFor(1.0, 0.1), Vec2{kX * scale, -kY * scale},
+                 Vec2{kVX * vk, kVY * vk}},
+            Body{2, 1.0, radiusFor(1.0, 0.1), Vec2{-kX * scale, kY * scale},
+                 Vec2{kVX * vk, kVY * vk}},
             Body{3, 1.0, radiusFor(1.0, 0.1), Vec2{0.0, 0.0},
-                 Vec2{-2.0 * kVX, -2.0 * kVY}},
+                 Vec2{-2.0 * kVX * vk, -2.0 * kVY * vk}},
         },
         cfg};
 }
 
-}  // namespace
-
-SimulationSetup createPreset(PresetName name, std::uint32_t seed) {
+SimulationSetup createPreset(PresetName name, std::int64_t seed) {
     switch (name) {
     case PresetName::TwoBody:
-        return twoBody();
+        return twoBody(seed);
     case PresetName::SolarSystem:
-        return solarSystem();
+        return solarSystem(seed);
     case PresetName::RandomCloud:
         return randomCloud(seed);
     case PresetName::FigureEight:
-        return figureEight();
+        return figureEight(seed);
     }
     return {};  // unreachable for valid enum values; keeps -Wreturn-type quiet
 }
