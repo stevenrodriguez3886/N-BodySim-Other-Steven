@@ -29,6 +29,11 @@ constexpr sf::Color kBodyPalette[8]{
 
 constexpr sf::Color kBackground(10, 12, 24);
 constexpr sf::Color kHudColor(220, 220, 230);
+constexpr sf::Color kMenuDimColor(168, 172, 190);      // inactive header/item text
+constexpr sf::Color kMenuAccentColor(120, 190, 255);   // open tab underline
+constexpr sf::Color kMenuSelectColor(150, 230, 170);   // current item + tick
+constexpr sf::Color kMenuPanelColor(22, 25, 38, 242);
+constexpr sf::Color kMenuBorderColor(70, 78, 100);
 constexpr double kMenuStripBottom = 34.0;
 
 // SFML 3.0.x has NO Font::getDefault() (that is a later 3.1/master API;
@@ -342,9 +347,19 @@ void SimulationApp::render() {
         window_.draw(body);
     }
 
+    if (font_.has_value()) {  // HUD on screen too (belt over the title bar).
+        // Drawn before the menu so an open dropdown overlays it cleanly.
+        sf::Text hud{*font_};  // SFML 3: ctor takes the Font, no default ctor
+        hud.setCharacterSize(14U);
+        hud.setFillColor(kHudColor);
+        hud.setString(liveTitle(menuState_) + statsSuffix_);
+        hud.setPosition(sf::Vector2f{8.0F, 40.0F});
+        window_.draw(hud);
+    }
+
     const MenuLayout layout = menuLayout(w, h, menuState_.openGroup);
     sf::RectangleShape menuBackground{sf::Vector2f{static_cast<float>(w), 28.0F}};
-    menuBackground.setFillColor(sf::Color(10, 12, 24, 153));
+    menuBackground.setFillColor(sf::Color(10, 12, 24, 200));
     window_.draw(menuBackground);
 
     if (layout.openGroup && !layout.items.empty()) {
@@ -352,11 +367,14 @@ void SimulationApp::render() {
         const float rowHeight = static_cast<float>(first.size.y);
         const float panelHeight = rowHeight *
                                   static_cast<float>(layout.items.size());
-        sf::RectangleShape panel{sf::Vector2f{
-            static_cast<float>(first.size.x), panelHeight}};
+        const float panelWidth = static_cast<float>(first.size.x);
+        sf::RectangleShape panel{
+            sf::Vector2f{panelWidth, panelHeight}};
         panel.setPosition(sf::Vector2f{static_cast<float>(first.topLeft.x),
                                        static_cast<float>(first.topLeft.y)});
-        panel.setFillColor(sf::Color(22, 25, 38, 235));
+        panel.setFillColor(kMenuPanelColor);
+        panel.setOutlineThickness(1.0F);
+        panel.setOutlineColor(kMenuBorderColor);
         window_.draw(panel);
     }
 
@@ -364,27 +382,27 @@ void SimulationApp::render() {
         for (std::size_t index = 0; index < layout.headers.size(); ++index) {
             const MenuGroup group = static_cast<MenuGroup>(index);
             const MenuRect& rect = layout.headers[index];
-            sf::RectangleShape header{sf::Vector2f{
-                static_cast<float>(rect.size.x),
-                static_cast<float>(menuState_.openGroup == group
-                                       ? std::min(rect.size.y, 22.0)
-                                       : rect.size.y)}};
-            header.setPosition(sf::Vector2f{static_cast<float>(rect.topLeft.x),
-                                           static_cast<float>(rect.topLeft.y)});
-            header.setFillColor(menuState_.openGroup == group
-                                    ? sf::Color(70, 78, 96, 235)
-                                    : sf::Color(32, 36, 50, 210));
-            window_.draw(header);
+            const bool open = menuState_.openGroup == group;
 
             sf::Text label{*font_};
             label.setCharacterSize(12U);
-            label.setFillColor(kHudColor);
+            label.setFillColor(open ? kHudColor : kMenuDimColor);
             label.setString(std::string(menuGroupLabel(group)) + ": " +
                             menuValue(menuState_, group));
             label.setPosition(sf::Vector2f{
                 static_cast<float>(rect.topLeft.x + 7.0),
                 static_cast<float>(rect.topLeft.y + 7.0)});
             window_.draw(label);
+
+            if (open) {  // tab indicator: accent underline, no filled box
+                sf::RectangleShape underline{sf::Vector2f{
+                    static_cast<float>(rect.size.x - 14.0), 2.0F}};
+                underline.setPosition(sf::Vector2f{
+                    static_cast<float>(rect.topLeft.x + 7.0),
+                    static_cast<float>(rect.topLeft.y) + 18.0F});
+                underline.setFillColor(kMenuAccentColor);
+                window_.draw(underline);
+            }
         }
 
         if (layout.openGroup) {
@@ -410,19 +428,20 @@ void SimulationApp::render() {
 
                 const std::string item = menuItemLabel(
                     *layout.openGroup, static_cast<int>(index), menuState_.seed);
+                const bool selected = static_cast<int>(index) == ticked;
                 sf::Text label{*font_};
                 label.setCharacterSize(13U);
-                label.setFillColor(kHudColor);
+                label.setFillColor(selected ? kHudColor : kMenuDimColor);
                 label.setString(item);
                 label.setPosition(sf::Vector2f{
                     static_cast<float>(rect.topLeft.x + 30.0),
                     static_cast<float>(rect.topLeft.y + 3.0)});
                 window_.draw(label);
 
-                if (static_cast<int>(index) == ticked) {
+                if (selected) {  // the one selection indicator: tick + tint
                     sf::Text tick{*font_};
                     tick.setCharacterSize(13U);
-                    tick.setFillColor(sf::Color(150, 230, 170));
+                    tick.setFillColor(kMenuSelectColor);
                     tick.setString("\xE2\x9C\x93");
                     tick.setPosition(sf::Vector2f{
                         static_cast<float>(rect.topLeft.x + 8.0),
@@ -443,20 +462,11 @@ void SimulationApp::render() {
             sf::RectangleShape chipBackground{
                 sf::Vector2f{chipWidth, 24.0F}};
             chipBackground.setPosition(sf::Vector2f{chipX, 4.0F});
-            chipBackground.setFillColor(sf::Color(70, 78, 96, 235));
+            chipBackground.setFillColor(sf::Color(40, 46, 66, 235));
             window_.draw(chipBackground);
             chip.setPosition(sf::Vector2f{chipX + 8.0F, 6.0F});
             window_.draw(chip);
         }
-    }
-
-    if (font_.has_value()) {  // HUD on screen too (belt over the title bar)
-        sf::Text hud{*font_};  // SFML 3: ctor takes the Font, no default ctor
-        hud.setCharacterSize(14U);
-        hud.setFillColor(kHudColor);
-        hud.setString(liveTitle(menuState_) + statsSuffix_);
-        hud.setPosition(sf::Vector2f{8.0F, 40.0F});
-        window_.draw(hud);
     }
 }
 
