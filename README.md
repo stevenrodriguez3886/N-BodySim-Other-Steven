@@ -12,7 +12,7 @@ unless a system SFML 3 is found; audio is never built — `SFML_BUILD_AUDIO=OFF`
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
-ctest --test-dir build        # 62 tests
+ctest --test-dir build        # 72 tests
 ```
 
 The executable is `build/nbody`.
@@ -51,12 +51,13 @@ identical output and md5).
 | Preset | Click the header to choose one of four presets |
 | Integrator | Click the header to choose RK4 or Euler |
 | Physics | Click the header to choose a time step or restart the scene |
-| Random seed | Click the header to adjust the seed |
+| Random seed | Click the header, then the "type a seed" row, and type the seed directly (see the menu section) |
 | Left-drag | Pan the camera |
 | Mouse wheel | Zoom anchored at the cursor position |
 
-The live FPS / UPS / body count / sim time are shown in the title bar (and
-on-screen when a system font is loadable).
+The live FPS / UPS / body count / sim time are shown in the window title bar
+only — the on-screen HUD duplicate was dropped in the visual overhaul (a
+loadable system font is still used for the menu labels and the staged chip).
 
 ## In-window menu
 
@@ -83,9 +84,18 @@ seed. The `R` key uses those same current menu options. Both restarts act
 immediately, even while paused, and use the already-applied options — staged
 choices stay pending until resume. If `--dt` sets a value
 outside the menu list, the Physics header shows that raw value and no dropdown
-choice is ticked. The seed stepper changes the value by one and does not go
-below zero. Menu navigation is mouse-only; keyboard menu navigation is not
+choice is ticked. Menu navigation is mouse-only; keyboard menu navigation is not
 supported.
+
+The Random seed dropdown is a single typed field, not a ± stepper: click its
+row to focus an inline editor pre-filled with the current live seed (a staged
+seed, if one is pending, is replaced when you commit). Type digits — at most
+10, values saturate at 4294967295 (`UINT32_MAX`) — and press Enter to commit
+(live when running, staged when paused, like every other group). Escape
+cancels the edit only; the dropdown stays open. Clicking anywhere else cancels
+the edit and then handles that click normally (dropdown hit, or close and
+drag). Mouse-wheel zoom while the editor is open deliberately does **not**
+cancel the edit — zoom and typing do not interfere.
 
 ## Physics notes
 
@@ -105,6 +115,15 @@ third law is enforced pair-by-pair, so total momentum is conserved exactly.
 survives (ties to the lower id), taking $m = m_1 + m_2$, position at the center of mass,
 $\vec{v} = (m_1 \vec{v}_1 + m_2 \vec{v}_2)/(m_1 + m_2)$, and
 $r = \sqrt{r_1^2 + r_2^2}$; the loser is erased.
+
+**Solar system.** Our sun (mass 500, rendered with a glow) plus 8 planets,
+Mercury through Neptune, on circular orbits with compressed spacing and the
+real mass and size ordering. Gas giants get latitude bands (Jupiter 3,
+Saturn 2) and Saturn gets a ring. Fully deterministic and RNG-free: the
+preset is a literal list and ignores the seed.
+
+**Starfield.** The background is 600 fixed-seed stars locked to the world:
+pan and zoom move them, and they never regenerate.
 
 **Euler vs RK4 demo.** Run the same scene under both integrators:
 
