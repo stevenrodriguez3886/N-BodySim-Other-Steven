@@ -12,6 +12,7 @@ using nbody::app::MenuGroup;
 using nbody::app::MenuState;
 using nbody::app::menuApply;
 using nbody::app::menuIsStagedActive;
+using nbody::app::menuSetSeed;
 using nbody::app::menuStaged;
 using nbody::app::menuStagedSummary;
 using nbody::app::menuTakeStaged;
@@ -30,8 +31,12 @@ TEST_CASE("model_apply_live_preset_and_other_live_effects") {
     REQUIRE(menuApply(state, {MenuGroup::Physics, 2}, false) ==
             MenuEffect::DtChanged);
     REQUIRE(state.dt == 1.0 / 120.0);
-    REQUIRE(menuApply(state, {MenuGroup::Seed, 1}, false) ==
-            MenuEffect::SeedChanged);
+    // The old (Seed, 0/1) stepper actions are gone: menuApply never mutates
+    // the seed any more; only menuSetSeed does (see below).
+    REQUIRE(menuApply(state, {MenuGroup::Seed, 0}, false) == MenuEffect::None);
+    REQUIRE(menuApply(state, {MenuGroup::Seed, 1}, false) == MenuEffect::None);
+    REQUIRE(state.seed == 42);
+    REQUIRE(menuSetSeed(state, 43, false) == MenuEffect::SeedChanged);
     REQUIRE(state.seed == 43);
     REQUIRE(menuStaged(state).empty());
 }
@@ -61,7 +66,7 @@ TEST_CASE("model_take_staged_returns_and_clears_staged_values") {
     MenuState state;
     REQUIRE(menuApply(state, {MenuGroup::Physics, 3}, true) ==
             MenuEffect::Staged);
-    REQUIRE(menuApply(state, {MenuGroup::Seed, 1}, true) == MenuEffect::Staged);
+    REQUIRE(menuSetSeed(state, 43, true) == MenuEffect::Staged);
     const auto staged = menuTakeStaged(state);
     REQUIRE(staged.dt == 1.0 / 240.0);
     REQUIRE(staged.seed == 43);
@@ -85,8 +90,7 @@ TEST_CASE("model_restart_while_paused_preserves_staged") {
             MenuEffect::Staged);
     REQUIRE(menuApply(state, {MenuGroup::Physics, 0}, true) ==
             MenuEffect::Staged);
-    REQUIRE(menuApply(state, {MenuGroup::Seed, 1}, true) ==
-            MenuEffect::Staged);
+    REQUIRE(menuSetSeed(state, 1234, true) == MenuEffect::Staged);
 
     REQUIRE(menuApply(state, {MenuGroup::Physics, 6}, true) ==
             MenuEffect::SceneRestart);
@@ -96,34 +100,49 @@ TEST_CASE("model_restart_while_paused_preserves_staged") {
     CHECK(menuStaged(state).integrator.value_or(
               IntegratorKind::Rk4) == IntegratorKind::Euler);
     CHECK(menuStaged(state).dt == 1.0 / 30.0);
-    CHECK(menuStaged(state).seed == state.seed + 1);
+    CHECK(menuStaged(state).seed == 1234);
 }
 
-TEST_CASE("model_seed_stepper_floors_at_zero") {
+TEST_CASE("model_set_seed_live_and_staged") {
     MenuState state;
-    state.seed = 0;
-    REQUIRE(menuApply(state, {MenuGroup::Seed, 0}, false) ==
-            MenuEffect::SeedChanged);
-    REQUIRE(state.seed == 0);
-    state.seed = 7;
-    REQUIRE(menuApply(state, {MenuGroup::Seed, 1}, false) ==
-            MenuEffect::SeedChanged);
-    REQUIRE(state.seed == 8);
+    REQUIRE(menuSetSeed(state, 777, false) == MenuEffect::SeedChanged);
+    REQUIRE(state.seed == 777);
+    REQUIRE(menuStaged(state).empty());
+
+    // Paused: staged only, state untouched; last write wins.
+    REQUIRE(menuSetSeed(state, 999, true) == MenuEffect::Staged);
+    REQUIRE(menuStaged(state).seed == 999);
+    REQUIRE(state.seed == 777);
+    REQUIRE(menuSetSeed(state, 1000, true) == MenuEffect::Staged);
+    REQUIRE(menuStaged(state).seed == 1000);
+    REQUIRE(state.seed == 777);
+
+    // The typed field replaced the stepper: no seed row ever ticks.
+    REQUIRE(menuTickedIndex(state, MenuGroup::Seed) == -1);
 }
 
-TEST_CASE("model_seed_stepper_saturates_high") {
+// Migrated from model_seed_stepper_floors_at_zero: the model now stores
+// exactly what it is given (no +/- clamping). Boundary values must pass
+// through in both paths; saturation-at-parse is app-side, not model-side.
+TEST_CASE("model_seed_set_stores_zero") {
+    MenuState state;
+    REQUIRE(menuSetSeed(state, 0, false) == MenuEffect::SeedChanged);
+    REQUIRE(state.seed == 0);
+    REQUIRE(menuSetSeed(state, 0, true) == MenuEffect::Staged);
+    REQUIRE(menuStaged(state).seed == 0);
+}
+
+// Migrated from model_seed_stepper_saturates_high.
+TEST_CASE("model_seed_set_stores_max") {
     constexpr auto maxSeed = std::numeric_limits<std::uint32_t>::max();
 
     MenuState liveState;
-    liveState.seed = maxSeed;
-    REQUIRE(menuApply(liveState, {MenuGroup::Seed, 1}, false) ==
+    REQUIRE(menuSetSeed(liveState, maxSeed, false) ==
             MenuEffect::SeedChanged);
     REQUIRE(liveState.seed == maxSeed);
 
     MenuState stagedState;
-    stagedState.seed = maxSeed;
-    REQUIRE(menuApply(stagedState, {MenuGroup::Seed, 1}, true) ==
-            MenuEffect::Staged);
+    REQUIRE(menuSetSeed(stagedState, maxSeed, true) == MenuEffect::Staged);
     REQUIRE(menuStaged(stagedState).seed == maxSeed);
 }
 

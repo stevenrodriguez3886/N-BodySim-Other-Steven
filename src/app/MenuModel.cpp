@@ -1,7 +1,6 @@
 #include "nbody/app/MenuModel.hpp"
 
 #include <array>
-#include <limits>
 #include <string>
 
 namespace nbody::app {
@@ -131,32 +130,24 @@ MenuEffect menuApply(MenuState& state, const MenuAction& action, bool paused) {
             }
             return MenuEffect::None;
 
-        case MenuGroup::Seed: {
-            if (action.index != 0 && action.index != 1) {
-                return MenuEffect::None;
-            }
-            std::uint32_t seed = paused && staged.seed ? *staged.seed : state.seed;
-            if (action.index == 0) {
-                if (seed > 0) {
-                    --seed;
-                }
-            } else {
-                if (seed < std::numeric_limits<std::uint32_t>::max()) {
-                    ++seed;
-                }
-            }
-            if (paused) {
-                staged.seed = seed;
-                return MenuEffect::Staged;
-            }
-            state.seed = seed;
-            return MenuEffect::SeedChanged;
-        }
+        case MenuGroup::Seed:
+            // The (Seed, 0/1) ± stepper actions are gone (typed seed field,
+            // spec D.4): seeds change only through menuSetSeed.
+            return MenuEffect::None;
 
         case MenuGroup::Count_:
             return MenuEffect::None;
     }
     return MenuEffect::None;
+}
+
+MenuEffect menuSetSeed(MenuState& state, std::uint32_t seed, bool paused) {
+    if (paused) {
+        MenuModelAccess::get(state).staged.seed = seed;
+        return MenuEffect::Staged;
+    }
+    state.seed = seed;
+    return MenuEffect::SeedChanged;
 }
 
 const MenuStaged& menuStaged(const MenuState& state) {

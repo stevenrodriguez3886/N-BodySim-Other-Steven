@@ -54,6 +54,11 @@ private:
 };
 
 MenuEffect menuApply(MenuState& state, const MenuAction& action, bool paused);
+// Typed seed field (spec D.4): the only way the seed changes through the
+// menu. Same staging law as dt: running -> apply live (SeedChanged),
+// paused -> stage (Staged, last-write-wins). The model stores exactly the
+// value given; parse saturation is app-side.
+MenuEffect menuSetSeed(MenuState& state, std::uint32_t seed, bool paused);
 const MenuStaged& menuStaged(const MenuState& state);
 MenuStaged menuTakeStaged(MenuState& state);
 const char* menuStagedSummary(const MenuState& state);

@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -33,6 +35,7 @@ constexpr sf::Color kMenuDimColor(168, 172, 190);      // inactive header/item t
 constexpr sf::Color kMenuSelectColor(150, 230, 170);   // current-item dot
 constexpr sf::Color kMenuPanelColor(22, 25, 38, 242);
 constexpr sf::Color kMenuBorderColor(70, 78, 100);
+constexpr sf::Color kMenuAccentColor(120, 190, 255);  // focused seed field border
 constexpr double kMenuStripBottom = 34.0;
 
 // SFML 3.0.x has NO Font::getDefault() (that is a later 3.1/master API;
@@ -161,6 +164,30 @@ void SimulationApp::handleAction(const MenuAction& action) {
     }
 }
 
+void SimulationApp::commitSeedEdit() {
+    seedEditing_ = false;
+    // 10 typed digits can exceed uint32 (up to 9999999999): saturate at
+    // UINT32_MAX instead of wrapping (Review Focus 4). An empty buffer
+    // parses as 0.
+    const unsigned long long raw =
+        std::strtoull(seedBuffer_.c_str(), nullptr, 10);
+    constexpr unsigned long long kMaxSeed =
+        std::numeric_limits<std::uint32_t>::max();
+    const std::uint32_t value =
+        raw > kMaxSeed ? static_cast<std::uint32_t>(kMaxSeed)
+                       : static_cast<std::uint32_t>(raw);
+    // The SAME staging law as every other group: live when running, staged
+    // (Space-resume applies it last, after preset/integrator/dt) when paused.
+    const MenuEffect effect = menuSetSeed(menuState_, value, paused_);
+    // Same dropdown-close behavior as activating any other item, whether
+    // the change applied live or staged.
+    menuState_.openGroup.reset();
+    if (effect == MenuEffect::SeedChanged &&
+        menuState_.preset == core::PresetName::RandomCloud) {
+        rebuildScene(false);  // SeedChanged rule, mirrored from handleAction
+    }
+}
+
 void SimulationApp::handleMenuHit(const MenuHit& hit, core::Vec2 position) {
     if (hit.kind == MenuHitKind::Header) {
         if (menuState_.openGroup == hit.group) {
@@ -182,6 +209,15 @@ void SimulationApp::handleMenuHit(const MenuHit& hit, core::Vec2 position) {
         if (row.contains(position)) {
             return;
         }
+    }
+
+    if (hit.group == MenuGroup::Seed && hit.index == 0) {
+        // The seed row is an input field, not an action (spec D.4): focus
+        // the inline editor, pre-filled with the current seed. The dropdown
+        // stays open; commit closes it, Esc keeps it, click-away cancels.
+        seedEditing_ = true;
+        seedBuffer_ = std::to_string(menuState_.seed);
+        return;
     }
 
     menuState_.openGroup.reset();
@@ -213,7 +249,45 @@ void SimulationApp::handleEvents() {
             window_.close();
             continue;
         }
+        // Seed editor priority (Review Focus 4): SFML posts TextEntered
+        // BEFORE the matching KeyPressed, so consuming printable input here
+        // first guarantees a typed digit can never double-handle -- its
+        // KeyPressed then falls into the editing branch below and is
+        // swallowed. Only digits belong to the field; Backspace/Enter/
+        // Escape act on KeyPressed (this app's existing key-event phase).
+        if (seedEditing_) {
+            if (const auto* text = ev->getIf<sf::Event::TextEntered>()) {
+                const char32_t ch = text->unicode;
+                if (ch >= U'0' && ch <= U'9' && seedBuffer_.size() < 10) {
+                    seedBuffer_.push_back(static_cast<char>(ch));
+                    while (seedBuffer_.size() > 1 &&
+                           seedBuffer_.front() == '0') {
+                        seedBuffer_.erase(seedBuffer_.begin());  // trim lead 0s
+                    }
+                }
+                // Every other printable codepoint (incl. Enter's \r and
+                // Backspace's 8/127, ctrl chars >= 0x80) is ignored here.
+                continue;
+            }
+        }
         if (const auto* key = ev->getIf<sf::Event::KeyPressed>()) {
+            if (seedEditing_) {
+                if (key->code == sf::Keyboard::Key::Escape) {
+                    // Cancel the EDIT ONLY: the dropdown stays open and the
+                    // app survives -- deliberately no fall-through to the
+                    // dropdown-close/quit Escape law below.
+                    seedEditing_ = false;
+                } else if (key->code == sf::Keyboard::Key::Backspace) {
+                    if (!seedBuffer_.empty()) {
+                        seedBuffer_.pop_back();  // empty buffer commits 0
+                    }
+                } else if (key->code == sf::Keyboard::Key::Enter) {
+                    commitSeedEdit();
+                }
+                // Any other key (Space, R, letters, ...) is swallowed here:
+                // typing must never pause (Space) or restart (R) the scene.
+                continue;
+            }
             if (key->code == sf::Keyboard::Key::Escape) {
                 if (menuState_.openGroup) {
                     menuState_.openGroup.reset();
@@ -268,6 +342,20 @@ void SimulationApp::handleEvents() {
                 static_cast<double>(size.x), static_cast<double>(size.y),
                 menuState_.openGroup);
             const MenuHit hit = menuHitTest(layout, position);
+            if (seedEditing_) {
+                const bool inField =
+                    (hit.kind == MenuHitKind::Item &&
+                     hit.group == MenuGroup::Seed && hit.index == 0) ||
+                    (hit.kind == MenuHitKind::Header &&
+                     hit.group == MenuGroup::Seed);
+                if (inField && press->button == sf::Mouse::Button::Left) {
+                    continue;  // click inside the field: focus stays, no-op
+                }
+                // Click-away: cancel the edit (discard the buffer), then
+                // let the click itself fall through to normal handling
+                // below -- menu hit or drag start, no early return (D.4).
+                seedEditing_ = false;
+            }
             if (press->button == sf::Mouse::Button::Left &&
                 hit.kind != MenuHitKind::None) {
                 handleMenuHit(hit, position);
@@ -565,6 +653,36 @@ void SimulationApp::render() {
                                            rect.size.y / 2.0)});
                     separator.setFillColor(sf::Color(105, 110, 125));
                     window_.draw(separator);
+                    continue;
+                }
+
+                if (*layout.openGroup == MenuGroup::Seed && seedEditing_ &&
+                    index == 0) {
+                    // Focused typed-seed field (spec D.4) at the row rect:
+                    // accent outline + buffer + caret. The caret blinks on
+                    // the existing statsClock_ 0.5 s period (shown for its
+                    // first half, hidden for its second).
+                    sf::RectangleShape field{sf::Vector2f{
+                        static_cast<float>(rect.size.x - 4.0),
+                        static_cast<float>(rect.size.y - 4.0)}};
+                    field.setPosition(sf::Vector2f{
+                        static_cast<float>(rect.topLeft.x + 2.0),
+                        static_cast<float>(rect.topLeft.y + 2.0)});
+                    field.setFillColor(kMenuPanelColor);
+                    field.setOutlineThickness(1.0F);
+                    field.setOutlineColor(kMenuAccentColor);
+                    window_.draw(field);
+
+                    const bool caretOn =
+                        statsClock_.getElapsedTime().asSeconds() < 0.25;
+                    sf::Text typed{*font_};
+                    typed.setCharacterSize(13U);
+                    typed.setFillColor(kHudColor);
+                    typed.setString(seedBuffer_ + (caretOn ? "|" : " "));
+                    typed.setPosition(sf::Vector2f{
+                        static_cast<float>(rect.topLeft.x + 8.0),
+                        static_cast<float>(rect.topLeft.y + 3.0)});
+                    window_.draw(typed);
                     continue;
                 }
 

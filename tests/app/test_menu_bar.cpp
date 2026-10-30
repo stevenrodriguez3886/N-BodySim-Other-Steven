@@ -90,10 +90,38 @@ TEST_CASE("menu_item_labels") {
     REQUIRE(menuItemCount(MenuGroup::Preset) == 4);
     REQUIRE(menuItemCount(MenuGroup::Integrator) == 2);
     REQUIRE(menuItemCount(MenuGroup::Physics) == 7);
-    REQUIRE(menuItemCount(MenuGroup::Seed) == 2);
+    REQUIRE(menuItemCount(MenuGroup::Seed) == 1);
     REQUIRE(menuItemLabel(MenuGroup::Physics, 6, 42) == "restart scene");
-    REQUIRE(menuItemLabel(MenuGroup::Seed, 0, 42) == "- 1");
+    REQUIRE(menuItemLabel(MenuGroup::Seed, 0, 42) == "type a seed");
     REQUIRE(menuItemLabel(MenuGroup::Preset, 1, 42) == "solar-system");
+}
+
+TEST_CASE("menu_seed_single_row") {
+    // The ± stepper rows are gone: exactly one input row, verbatim label.
+    REQUIRE(menuItemCount(MenuGroup::Seed) == 1);
+    REQUIRE(menuItemLabel(MenuGroup::Seed, 0, 42) == "type a seed");
+    REQUIRE(menuItemLabel(MenuGroup::Seed, 1, 42).empty());
+
+    // Hit semantics unchanged: header click opens the group, row 0 is Item 0.
+    const auto closed = menuLayout(800.0, 600.0, std::nullopt);
+    const auto& seedHeader = closed.headers[3];
+    const auto headerHit = menuHitTest(
+        closed, {seedHeader.topLeft.x + seedHeader.size.x / 2.0,
+                 seedHeader.topLeft.y + seedHeader.size.y / 2.0});
+    REQUIRE(headerHit.kind == MenuHitKind::Header);
+    REQUIRE(headerHit.group == MenuGroup::Seed);
+    REQUIRE(headerHit.index == -1);
+
+    const auto open = menuLayout(800.0, 600.0, MenuGroup::Seed);
+    REQUIRE(open.items.size() == 1);
+    const auto& row = open.items[0];
+    REQUIRE(row.size.y == 24.0);
+    const auto rowHit = menuHitTest(
+        open, {row.topLeft.x + row.size.x / 2.0,
+               row.topLeft.y + row.size.y / 2.0});
+    REQUIRE(rowHit.kind == MenuHitKind::Item);
+    REQUIRE(rowHit.group == MenuGroup::Seed);
+    REQUIRE(rowHit.index == 0);
 }
 
 TEST_CASE("menu_hit_disabled_row") {

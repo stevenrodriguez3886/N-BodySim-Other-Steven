@@ -99,7 +99,9 @@ int menuItemCount(MenuGroup group) {
         case MenuGroup::Physics:
             return 7;
         case MenuGroup::Seed:
-            return 2;
+            // Single input row (typed seed field, spec D.4): the ± stepper's
+            // two rows are gone.
+            return 1;
         case MenuGroup::Count_:
             return 0;
     }
@@ -134,7 +136,7 @@ std::string menuItemLabel(MenuGroup group, int index, std::uint32_t) {
         case MenuGroup::Physics:
             return kPhysicsLabels[index];
         case MenuGroup::Seed:
-            return index == 0 ? "- 1" : "+ 1";
+            return "type a seed";  // the row focuses the inline editor
         case MenuGroup::Count_:
             return {};
     }

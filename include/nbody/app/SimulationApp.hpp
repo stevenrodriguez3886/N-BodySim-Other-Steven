@@ -43,6 +43,7 @@ private:
     void handleEvents();
     void handleMenuHit(const MenuHit& hit, core::Vec2 position);
     void handleAction(const MenuAction& action);
+    void commitSeedEdit();
     void restartScene();
     void rebuildScene(bool refitCamera);
     void update(sf::Time frameTime);
@@ -58,6 +59,12 @@ private:
     std::optional<sf::Font> font_;  // nullopt -> HUD text skipped, title only
     bool paused_ = false;
     bool dragging_ = false;
+    // Inline typed seed field of the Seed dropdown (spec D.4): focused by
+    // clicking its single row. Digits only (max 10), Enter commits through
+    // the staging law, Esc cancels the edit only, click-away cancels then
+    // processes. The caret blink reuses statsClock_'s 0.5 s period.
+    bool seedEditing_ = false;
+    std::string seedBuffer_;
     sf::Vector2i lastMouse_{0, 0};
     double accumulator_ = 0.0;
 
