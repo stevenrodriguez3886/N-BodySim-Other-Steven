@@ -268,9 +268,11 @@ TEST_CASE("preset_solar_eight_bodies_circular") {
     // rocky inner planets stay tiny (floored at the 1e-4 spec floor, far
     // below 1.0); both gas giants sit clearly above every inner planet;
     // and the heaviest planet is Jupiter at index 4 (bodies[5]). (The
-    // review note's literal "gas giants > 50.0" does not match the
+    // review relay's literal "gas giants > 50.0" does not match the
     // shipped band — verified against Presets.cpp — so the 10x
-    // separation ratio below is the assertion that actually holds.)
+    // separation ratio below is the assertion that actually holds.
+    // The 10x check covers only the four rocky planets; Uranus/Neptune
+    // are within 10x of Saturn (~5.6x) by design.)
     for (int i = 0; i < 4; ++i) {
         CAPTURE(i);
         const double m = setup.bodies[static_cast<std::size_t>(i) + 1].mass;
