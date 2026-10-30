@@ -190,7 +190,11 @@ SimulationSetup randomCloud(std::int64_t seed, std::uint32_t count) {
 // k=0.1 is free per C.5 (equal masses) and keeps the merge threshold (0.2) a
 // factor 3.4 below the orbit's minimum pairwise separation (0.690, measured,
 // dt-converged) — the choreography must never merge.
-// scale (spec D.2): positions xk, velocities xsqrt(k); 1.0 = today, bitwise.
+// scale: positions xk, velocities /sqrt(k) — the Keplerian self-similarity
+// of Newtonian gravity with G fixed (a scaled copy traverses the same shape
+// on a time axis xk^1.5). The x sqrt(k) of spec D.2's literal is a merely
+// positional scaling and drifts/unbinds for k != 1. 1.0 = today, bitwise
+// (sqrt(1.0) == 1.0 and division by 1.0 is exact).
 SimulationSetup figureEight(std::int64_t /*seed*/, double scale) {
     const double vk = std::sqrt(scale);
     WorldConfig cfg;
@@ -204,11 +208,11 @@ SimulationSetup figureEight(std::int64_t /*seed*/, double scale) {
     return SimulationSetup{
         {
             Body{1, 1.0, radiusFor(1.0, 0.1), Vec2{kX * scale, -kY * scale},
-                 Vec2{kVX * vk, kVY * vk}},
+                 Vec2{kVX / vk, kVY / vk}},
             Body{2, 1.0, radiusFor(1.0, 0.1), Vec2{-kX * scale, kY * scale},
-                 Vec2{kVX * vk, kVY * vk}},
+                 Vec2{kVX / vk, kVY / vk}},
             Body{3, 1.0, radiusFor(1.0, 0.1), Vec2{0.0, 0.0},
-                 Vec2{-2.0 * kVX * vk, -2.0 * kVY * vk}},
+                 Vec2{-2.0 * kVX / vk, -2.0 * kVY / vk}},
         },
         cfg};
 }

@@ -35,7 +35,8 @@ std::uint32_t foldSeed(std::int64_t seed);
 //    clamped [0, 8]; pluto appends body id 10 (a ~= 200, circular) ONLY
 //    when the clamped count == 8.
 //  - figureEight: scale k on the classic choreography (positions xk,
-//    velocities xsqrt(k), spec D.2).
+//    velocities /sqrt(k) per Keplerian self-similarity, time axis xk^1.5;
+//    supersedes spec D.2's x sqrt(k), which drifts).
 //  - randomCloud: count clamped [2, 2000], default 150. Prefix contract:
 //    the shared RNG stream is consumed in the same per-body order, so the
 //    first N bodies of (seed, M) equal all of (seed, N) for N <= M.

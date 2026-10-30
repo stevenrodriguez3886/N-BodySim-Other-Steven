@@ -551,8 +551,10 @@ TEST_CASE("preset_figure_eight_scale") {
     CHECK(bodiesBitwiseEqual(
         def.bodies, createPreset(PresetName::FigureEight, 0).bodies));
 
-    // figureEight(scale=3): positions x3, velocities x sqrt(3) (spec D.2
-    // self-similarity rule), bitwise against the same scalar ops.
+    // figureEight(scale=3): positions x3, velocities /sqrt(3) (Keplerian
+    // self-similarity: G fixed => scaled copy runs on a time axis xk^1.5;
+    // the old x sqrt(3) of spec D.2's literal drifts), bitwise against the
+    // same scalar ops applied to the default velocities.
     const SimulationSetup s3 = figureEight(0, 3.0);
     REQUIRE(s3.bodies.size() == 3);
     const double k = std::sqrt(3.0);
@@ -563,12 +565,65 @@ TEST_CASE("preset_figure_eight_scale") {
         CHECK(bitsEqual(s3.bodies[i].position.y,
                         def.bodies[i].position.y * 3.0));
         CHECK(bitsEqual(s3.bodies[i].velocity.x,
-                        def.bodies[i].velocity.x * k));
+                        def.bodies[i].velocity.x / k));
         CHECK(bitsEqual(s3.bodies[i].velocity.y,
-                        def.bodies[i].velocity.y * k));
+                        def.bodies[i].velocity.y / k));
         CHECK(bitsEqual(s3.bodies[i].mass, def.bodies[i].mass));
         CHECK(bitsEqual(s3.bodies[i].radius, def.bodies[i].radius));
     }
+
+    // Long-run shape evidence (review ruling, replaces the x sqrt(k) drift):
+    // 5000 RK4 steps (dt = 1/120) at scale=3 vs the default run. Measured:
+    // default pairwise band [0.690467, 2.00025], scale3 [2.07137, 6.00067]
+    // = exactly 3x, identical dimensionless band ratio 2.53174; all finite,
+    // zero merges. Assert bounded + that scaled equivalence.
+    struct Band {
+        double lo;
+        double hi;
+        std::uint64_t merges;
+        bool finite;
+    };
+    auto band = [](SimulationSetup s, std::uint64_t steps) {
+        PhysicsWorld world{s.config, makeIntegrator(IntegratorKind::Rk4)};
+        world.reset(std::move(s.bodies));
+        Band b{1e300, 0.0, 0, true};
+        for (std::uint64_t i = 0; i <= steps; ++i) {
+            const auto& bs = world.bodies();
+            for (std::size_t a = 0; a < bs.size(); ++a) {
+                b.finite =
+                    b.finite && std::isfinite(bs[a].position.x) &&
+                    std::isfinite(bs[a].position.y);
+                for (std::size_t c = a + 1; c < bs.size(); ++c) {
+                    const double dx = bs[a].position.x - bs[c].position.x;
+                    const double dy = bs[a].position.y - bs[c].position.y;
+                    const double d = std::sqrt(dx * dx + dy * dy);
+                    b.finite = b.finite && std::isfinite(d);
+                    b.lo = std::min(b.lo, d);
+                    b.hi = std::max(b.hi, d);
+                }
+            }
+            if (i != steps) {
+                world.step();
+            }
+        }
+        b.merges = world.mergeCount();
+        return b;
+    };
+    const Band dBand = band(figureEight(0, 1.0), 5000);
+    const Band sBand = band(figureEight(0, 3.0), 5000);
+    CHECK(sBand.finite);
+    CHECK(dBand.finite);
+    CHECK(sBand.merges == 0);
+    // Bounded: no unbinding (start spread is 6.0), no collisions (merge
+    // threshold is 0.2 at scale 1, min separation ~2.07 at scale 3).
+    CHECK(sBand.hi < 12.0);
+    CHECK(sBand.lo > 1.0);
+    // Scaled-copy equivalence: every extent is 3x the default's, and the
+    // dimensionless shape ratio matches (choreography keeps its shape).
+    CHECK(sBand.lo == Approx(3.0 * dBand.lo).epsilon(0.01));
+    CHECK(sBand.hi == Approx(3.0 * dBand.hi).epsilon(0.01));
+    CHECK(sBand.hi / sBand.lo ==
+          Approx(dBand.hi / dBand.lo).epsilon(0.01));
 }
 
 TEST_CASE("preset_solar_planet_count_and_pluto") {
