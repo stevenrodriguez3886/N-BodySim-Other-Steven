@@ -163,28 +163,54 @@ TEST_CASE("preset_cloud_determinism") {
 }
 
 TEST_CASE("preset_solar_planets_bounded") {
-    // Spec D.2: 2000 steps at the preset's default dt; every planet must stay
-    // within 1.35x its initial sun-distance (bound orbits, no ejections) and
-    // nothing may collide (compressed spacings are still >> collision radii).
+    // Spec D.2: 2000 steps; every planet must stay within a bound times its
+    // initial sun-distance (no ejections) and nothing may collide (compressed
+    // spacings are still >> collision radii). Run under BOTH integrators,
+    // three arms (all measured on this machine, bodies deterministic):
+    //  - RK4 at the preset dt: the spec's 1.35 bound, with huge room (max
+    //    ratio 1.0001).
+    //  - Euler at the preset dt: a documented looser 1.5 bound. Mercury
+    //    spirals to 1.442 by step 2000 -- Euler's O(dt) energy injection IS
+    //    the README "Euler spirals outward" demo, so 1.35 legitimately does
+    //    not hold at this dt; the system is still bounded, 0 merges.
+    //  - Euler dt-converged at 1/480: the SAME 1.35 bound holds with room
+    //    (max 1.040), proving the drift is a dt artifact, not an unstable
+    //    preset.
     SimulationSetup setup = createPreset(PresetName::SolarSystem, 42);
     REQUIRE(setup.bodies.size() == 9);
     const std::vector<Body> start = setup.bodies;
 
-    PhysicsWorld world{setup.config, makeIntegrator(IntegratorKind::Rk4)};
-    world.reset(std::move(setup.bodies));
-    for (int i = 0; i < 2000; ++i) {
-        world.step();
-    }
+    struct Run {
+        IntegratorKind kind;
+        double dt;
+        double bound;
+    };
+    const Run runs[] = {
+        {IntegratorKind::Rk4, setup.config.timeStep, 1.35},
+        {IntegratorKind::Euler, setup.config.timeStep, 1.5},
+        {IntegratorKind::Euler, 1.0 / 480.0, 1.35},
+    };
+    for (const Run& run : runs) {
+        CAPTURE(run.kind, run.dt);
+        WorldConfig cfg = setup.config;
+        cfg.timeStep = run.dt;
+        PhysicsWorld world{cfg, makeIntegrator(run.kind)};
+        std::vector<Body> bodies0 = setup.bodies;
+        world.reset(std::move(bodies0));
+        for (int i = 0; i < 2000; ++i) {
+            world.step();
+        }
 
-    CHECK(world.mergeCount() == 0);
-    const auto& bodies = world.bodies();
-    REQUIRE(bodies.size() == 9);  // no merges => document order preserved
-    for (std::size_t i = 1; i < bodies.size(); ++i) {
-        const double r0 =
-            length(start[i].position - start[0].position);
-        const double r1 = length(bodies[i].position - bodies[0].position);
-        CHECK(std::isfinite(r1));
-        CHECK(r1 < 1.35 * r0);
+        CHECK(world.mergeCount() == 0);
+        const auto& bodies = world.bodies();
+        REQUIRE(bodies.size() == 9);  // no merges => document order preserved
+        for (std::size_t i = 1; i < bodies.size(); ++i) {
+            const double r0 =
+                length(start[i].position - start[0].position);
+            const double r1 = length(bodies[i].position - bodies[0].position);
+            CHECK(std::isfinite(r1));
+            CHECK(r1 < run.bound * r0);
+        }
     }
 }
 
@@ -237,6 +263,37 @@ TEST_CASE("preset_solar_eight_bodies_circular") {
         CHECK(p.appearance.ring == (i == 5));    // Saturn only
         CHECK(p.appearance.bands == (i == 4 ? 3 : (i == 5 ? 2 : 0)));
     }
+
+    // Mass bands (T1 review minor): spec D.2's band is 1e-4..8e-3. The
+    // rocky inner planets stay tiny (floored at the 1e-4 spec floor, far
+    // below 1.0); both gas giants sit clearly above every inner planet;
+    // and the heaviest planet is Jupiter at index 4 (bodies[5]). (The
+    // review note's literal "gas giants > 50.0" does not match the
+    // shipped band — verified against Presets.cpp — so the 10x
+    // separation ratio below is the assertion that actually holds.)
+    for (int i = 0; i < 4; ++i) {
+        CAPTURE(i);
+        const double m = setup.bodies[static_cast<std::size_t>(i) + 1].mass;
+        CHECK(m >= 1e-4);
+        CHECK(m < 1.0);
+    }
+    const double jupiter = setup.bodies[5].mass;
+    const double saturn = setup.bodies[6].mass;
+    CHECK(jupiter > 1.0e-3);
+    CHECK(saturn > 1.0e-3);
+    CHECK(saturn < jupiter);  // Jupiter is the heaviest planet ...
+    for (int i = 0; i < 4; ++i) {
+        const double m = setup.bodies[static_cast<std::size_t>(i) + 1].mass;
+        CHECK(jupiter > 10.0 * m);
+        CHECK(saturn > 10.0 * m);
+    }
+    std::size_t heaviest = 5;  // ... proven at the index level, too
+    for (std::size_t i = 1; i < setup.bodies.size(); ++i) {
+        if (setup.bodies[i].mass > setup.bodies[heaviest].mass) {
+            heaviest = i;
+        }
+    }
+    CHECK(heaviest == 5);  // bodies[5] == planets[4] == Jupiter
 }
 
 TEST_CASE("preset_solar_no_rng") {

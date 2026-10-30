@@ -139,6 +139,17 @@ void SimulationApp::restartScene() {
     rebuildScene(true);
 }
 
+// The SeedChanged rule, shared by its three sites (handleAction,
+// commitSeedEdit, the Space staged-resume block below): random-cloud
+// regenerates immediately with the camera preserved (no refit); for every
+// other preset the new seed is merely stored, taking effect on the next
+// random-cloud load. Keep all three sites routed through here.
+void SimulationApp::applySeedEffect() {
+    if (menuState_.preset == core::PresetName::RandomCloud) {
+        rebuildScene(false);
+    }
+}
+
 void SimulationApp::handleAction(const MenuAction& action) {
     switch (menuApply(menuState_, action, paused_)) {
         case MenuEffect::PresetChanged:
@@ -151,9 +162,7 @@ void SimulationApp::handleAction(const MenuAction& action) {
             world_.setTimeStep(menuState_.dt);
             break;
         case MenuEffect::SeedChanged:
-            if (menuState_.preset == core::PresetName::RandomCloud) {
-                rebuildScene(false);
-            }
+            applySeedEffect();
             break;
         case MenuEffect::SceneRestart:
             restartScene();
@@ -182,9 +191,8 @@ void SimulationApp::commitSeedEdit() {
     // Same dropdown-close behavior as activating any other item, whether
     // the change applied live or staged.
     menuState_.openGroup.reset();
-    if (effect == MenuEffect::SeedChanged &&
-        menuState_.preset == core::PresetName::RandomCloud) {
-        rebuildScene(false);  // SeedChanged rule, mirrored from handleAction
+    if (effect == MenuEffect::SeedChanged) {
+        applySeedEffect();
     }
 }
 
@@ -249,12 +257,14 @@ void SimulationApp::handleEvents() {
             window_.close();
             continue;
         }
-        // Seed editor priority (Review Focus 4): SFML posts TextEntered
-        // BEFORE the matching KeyPressed, so consuming printable input here
-        // first guarantees a typed digit can never double-handle -- its
-        // KeyPressed then falls into the editing branch below and is
-        // swallowed. Only digits belong to the field; Backspace/Enter/
-        // Escape act on KeyPressed (this app's existing key-event phase).
+        // Seed editor priority (Review Focus 4): the delivery ORDER of
+        // TextEntered vs the matching KeyPressed varies by platform (on
+        // X11, WindowImplX11 pushes KeyPressed before TextEntered) -- never
+        // rely on it here. Correctness is order-independent because the two
+        // editing branches are disjoint: the TextEntered branch consumes
+        // only digits, the KeyPressed branch only Enter/Escape/Backspace
+        // (plus swallowing all other keys while editing), so no input can
+        // double-handle under either platform order.
         if (seedEditing_) {
             if (const auto* text = ev->getIf<sf::Event::TextEntered>()) {
                 const char32_t ch = text->unicode;
@@ -313,9 +323,7 @@ void SimulationApp::handleEvents() {
                     }
                     if (staged.seed) {
                         menuState_.seed = *staged.seed;
-                        if (menuState_.preset == core::PresetName::RandomCloud) {
-                            rebuildScene(false);
-                        }
+                        applySeedEffect();
                     }
                 }
                 paused_ = !paused_;  // rendering continues while paused
@@ -450,6 +458,8 @@ void drawBody(sf::RenderWindow& window, const core::Body& body,
     };
 
     if (body.appearance.glow) {  // sun: three soft concentric halos
+        // Halo radii deliberately tighter than spec D.3's 3.2/2.1/1.4: less
+        // overdraw on aarch64, and verified visually acceptable.
         const double haloRadius[3] = {px * 2.5, px * 1.8, px * 1.3};
         const std::uint8_t haloAlpha[3] = {24, 48, 96};
         for (int i = 0; i < 3; ++i) {
@@ -479,7 +489,13 @@ void drawBody(sf::RenderWindow& window, const core::Body& body,
                 center.x + static_cast<float>(lx * cr - ly * sr),
                 center.y + static_cast<float>(lx * sr + ly * cr)};
         };
-        sf::VertexArray ring{sf::PrimitiveType::Triangles};
+        // SFML 3.0.2's sf::VertexArray has no reserve() (only resize /
+        // append -- VertexArray.hpp), so sizing it up front to the exact
+        // upper bound (6 vertices per segment, none skipped) is the
+        // reserve: one allocation, no append-time regrowth.
+        sf::VertexArray ring{sf::PrimitiveType::Triangles,
+                            static_cast<std::size_t>(kSegments) * 6U};
+        std::size_t used = 0;
         for (int i = 0; i < kSegments; ++i) {
             const double a0 = 2.0 * kPi * static_cast<double>(i) /
                               static_cast<double>(kSegments);
@@ -495,13 +511,14 @@ void drawBody(sf::RenderWindow& window, const core::Body& body,
             const sf::Vector2f i1 = pointAt(px * 1.45, a1);
             const sf::Vector2f o0 = pointAt(px * 2.3, a0);
             const sf::Vector2f o1 = pointAt(px * 2.3, a1);
-            ring.append(sf::Vertex{i0, ringColor});
-            ring.append(sf::Vertex{o0, ringColor});
-            ring.append(sf::Vertex{o1, ringColor});
-            ring.append(sf::Vertex{i0, ringColor});
-            ring.append(sf::Vertex{o1, ringColor});
-            ring.append(sf::Vertex{i1, ringColor});
+            ring[used++] = sf::Vertex{i0, ringColor};
+            ring[used++] = sf::Vertex{o0, ringColor};
+            ring[used++] = sf::Vertex{o1, ringColor};
+            ring[used++] = sf::Vertex{i0, ringColor};
+            ring[used++] = sf::Vertex{o1, ringColor};
+            ring[used++] = sf::Vertex{i1, ringColor};
         }
+        ring.resize(used);  // drop the segments the front pass skipped
         if (ring.getVertexCount() > 0) {
             window.draw(ring);
         }
@@ -531,8 +548,9 @@ void drawBody(sf::RenderWindow& window, const core::Body& body,
     }
 
     // Gas-giant bands (D.3): chord RectangleShapes fully inside the disc, no
-    // stencil needed. Latitudes t = 2k/(bands+1)-1, half-chord
-    // 0.88*r*sqrt(1-t^2), height r*0.35/(bands/2), colour = 0.72x body RGB.
+    // stencil needed. Latitudes t = +-0.4 exactly for two-band planets (spec),
+    // else the generic t = 2k/(bands+1)-1; half-chord 0.88*r*sqrt(1-t^2),
+    // height r*0.35/(bands/2), colour = 0.72x body RGB.
     if (body.appearance.bands > 0 && px >= 8.0) {
         const int bands = body.appearance.bands;
         const float bandHeight = static_cast<float>(px * 0.35 / (bands / 2.0));
@@ -541,10 +559,16 @@ void drawBody(sf::RenderWindow& window, const core::Body& body,
             static_cast<std::uint8_t>(bodyColor.g * 0.72F),
             static_cast<std::uint8_t>(bodyColor.b * 0.72F), 255);
         for (int k = 1; k <= bands; ++k) {
+            // Spec D.3 pins the two-band latitudes to exactly +-0.4r; the
+            // generic formula would give +-1/3, so emit +-0.4*px directly
+            // when bands==2 (Saturn). Jupiter (bands=3) keeps the generic
+            // -0.5/0/+0.5 pattern (deviation documented, not silently off).
             const double t =
-                2.0 * static_cast<double>(k) /
-                    static_cast<double>(bands + 1) -
-                1.0;
+                bands == 2
+                    ? (k == 1 ? -0.4 : 0.4)
+                    : 2.0 * static_cast<double>(k) /
+                          static_cast<double>(bands + 1) -
+                          1.0;
             const double halfW =
                 px * std::sqrt(std::max(0.0, 1.0 - t * t)) * 0.88;
             sf::RectangleShape band{
@@ -581,6 +605,8 @@ void SimulationApp::render() {
             sf::Vector2f{static_cast<float>(star.sizePx),
                         static_cast<float>(star.sizePx)}};
         dot.setPosition(toSf(p));
+        // dim = alpha 120, spec D.3's 0.2-0.8 band; bright = FULL white:
+        // a deliberate deviation for visibility on bright desktops.
         dot.setFillColor(sf::Color(
             star.r, star.g, star.b,
             static_cast<std::uint8_t>(star.dim ? 120 : 255)));

@@ -46,6 +46,7 @@ private:
     void commitSeedEdit();
     void restartScene();
     void rebuildScene(bool refitCamera);
+    void applySeedEffect();  // the shared SeedChanged rule (see .cpp)
     void update(sf::Time frameTime);
     void render();
     void updateStats();
