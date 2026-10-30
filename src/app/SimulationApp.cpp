@@ -75,33 +75,31 @@ std::string formatStats(double fps, double ups, std::size_t bodies,
 std::string menuValue(const nbody::app::MenuState& state,
                       nbody::app::MenuGroup group) {
     using nbody::app::MenuGroup;
-    if (group == MenuGroup::Seed) {
+    if (group == MenuGroup::Cloud) {
         return std::to_string(state.seed);
     }
     if (group == MenuGroup::Physics) {
         const int ticked = nbody::app::menuTickedIndex(state, group);
         if (ticked >= 0) {
-            return nbody::app::menuItemLabel(group, ticked, state.seed);
+            return nbody::app::menuItemLabel(state, group, ticked);
         }
         std::ostringstream out;
         out << std::setprecision(12) << state.dt;
         return out.str();
     }
     const int ticked = nbody::app::menuTickedIndex(state, group);
-    return nbody::app::menuItemLabel(group, ticked, state.seed);
+    return nbody::app::menuItemLabel(state, group, ticked);
 }
 
 std::string liveTitle(const nbody::app::MenuState& state) {
     using nbody::app::MenuGroup;
     return nbody::app::menuItemLabel(
-               MenuGroup::Preset,
-               nbody::app::menuTickedIndex(state, MenuGroup::Preset),
-               state.seed) +
+               state, MenuGroup::Simulation,
+               nbody::app::menuTickedIndex(state, MenuGroup::Simulation)) +
            " | " +
            nbody::app::menuItemLabel(
-               MenuGroup::Integrator,
-               nbody::app::menuTickedIndex(state, MenuGroup::Integrator),
-               state.seed);
+               state, MenuGroup::Integrator,
+               nbody::app::menuTickedIndex(state, MenuGroup::Integrator));
 }
 
 }  // namespace
@@ -109,7 +107,7 @@ std::string liveTitle(const nbody::app::MenuState& state) {
 namespace nbody::app {
 
 SimulationApp::SimulationApp(core::SimulationSetup setup,
-                             core::PresetName preset, std::uint32_t seed,
+                             core::PresetName preset, std::int64_t seed,
                              core::IntegratorKind integrator,
                              std::string_view title)
     : world_{setup.config, core::makeIntegrator(integrator)}
@@ -168,6 +166,14 @@ void SimulationApp::handleAction(const MenuAction& action) {
         case MenuEffect::SceneRestart:
             restartScene();
             break;
+        // Option effects: the rebuild-with-options wiring lands in Task 4
+        // (createPreset still applies defaults; the per-preset option
+        // builders need menuState_'s separation/path/planets/pluto/bodies).
+        case MenuEffect::BodiesChanged:
+        case MenuEffect::SeparationChanged:
+        case MenuEffect::PathChanged:
+        case MenuEffect::PlanetsChanged:
+        case MenuEffect::PlutoChanged:
         case MenuEffect::Staged:
         case MenuEffect::None:
             break;
@@ -176,16 +182,10 @@ void SimulationApp::handleAction(const MenuAction& action) {
 
 void SimulationApp::commitSeedEdit() {
     seedEditing_ = false;
-    // 10 typed digits can exceed uint32 (up to 9999999999): saturate at
-    // UINT32_MAX instead of wrapping (Review Focus 4). An empty buffer
-    // parses as 0.
-    const unsigned long long raw =
-        std::strtoull(seedBuffer_.c_str(), nullptr, 10);
-    constexpr unsigned long long kMaxSeed =
-        std::numeric_limits<std::uint32_t>::max();
-    const std::uint32_t value =
-        raw > kMaxSeed ? static_cast<std::uint32_t>(kMaxSeed)
-                       : static_cast<std::uint32_t>(raw);
+    // int64 seeds (spec D.3): today's editor buffer is digits-only up to 10
+    // chars, so the value always fits; Task 4 extends the grammar to the
+    // signed 19-char field with saturation. An empty buffer parses as 0.
+    const std::int64_t value = std::strtoll(seedBuffer_.c_str(), nullptr, 10);
     // The SAME staging law as every other group: live when running, staged
     // (Space-resume applies it last, after preset/integrator/dt) when paused.
     const MenuEffect effect = menuSetSeed(menuState_, value, paused_);
@@ -213,14 +213,14 @@ void SimulationApp::handleMenuHit(const MenuHit& hit, core::Vec2 position) {
     const sf::Vector2u size = window_.getSize();
     const MenuLayout layout = menuLayout(
         static_cast<double>(size.x), static_cast<double>(size.y),
-        menuState_.openGroup);
+        menuState_.openGroup, menuState_.preset);
     for (const MenuRect& row : layout.disabledRows) {
         if (row.contains(position)) {
             return;
         }
     }
 
-    if (hit.group == MenuGroup::Seed && hit.index == 0) {
+    if (hit.group == MenuGroup::Cloud && hit.index == 0) {
         // The seed row is an input field, not an action (spec D.4): focus
         // the inline editor, pre-filled with the current seed. The dropdown
         // stays open; commit closes it, Esc keeps it, click-away cancels.
@@ -308,6 +308,12 @@ void SimulationApp::handleEvents() {
             } else if (key->code == sf::Keyboard::Key::Space) {
                 if (paused_) {
                     const MenuStaged staged = menuTakeStaged(menuState_);
+                    // Consumption order (spec D.3): preset (rebuilds with
+                    // the option values) -> integrator -> dt -> seed ->
+                    // bodies. The staged option fields (separation/path/
+                    // planets/pluto) fold into the preset rebuild step —
+                    // Task 4 wires that plus the staged.bodies tail; the
+                    // model already carries them.
                     if (staged.preset) {
                         menuState_.preset = *staged.preset;
                         rebuildScene(true);
@@ -349,14 +355,14 @@ void SimulationApp::handleEvents() {
                                       static_cast<double>(press->position.y)};
             const MenuLayout layout = menuLayout(
                 static_cast<double>(size.x), static_cast<double>(size.y),
-                menuState_.openGroup);
+                menuState_.openGroup, menuState_.preset);
             const MenuHit hit = menuHitTest(layout, position);
             if (seedEditing_) {
                 const bool inField =
                     (hit.kind == MenuHitKind::Item &&
-                     hit.group == MenuGroup::Seed && hit.index == 0) ||
+                     hit.group == MenuGroup::Cloud && hit.index == 0) ||
                     (hit.kind == MenuHitKind::Header &&
-                     hit.group == MenuGroup::Seed);
+                     hit.group == MenuGroup::Cloud);
                 if (inField && press->button == sf::Mouse::Button::Left) {
                     continue;  // click inside the field: focus stays, no-op
                 }
@@ -628,7 +634,8 @@ void SimulationApp::render() {
     // in the title bar only (updateStats). The staged-chip below stays --
     // it is menu UI, not a HUD.
 
-    const MenuLayout layout = menuLayout(w, h, menuState_.openGroup);
+    const MenuLayout layout =
+        menuLayout(w, h, menuState_.openGroup, menuState_.preset);
     sf::RectangleShape menuBackground{sf::Vector2f{static_cast<float>(w), 28.0F}};
     menuBackground.setFillColor(sf::Color(10, 12, 24, 200));
     window_.draw(menuBackground);
@@ -651,7 +658,9 @@ void SimulationApp::render() {
 
     if (font_.has_value()) {
         for (std::size_t index = 0; index < layout.headers.size(); ++index) {
-            const MenuGroup group = static_cast<MenuGroup>(index);
+            // Hidden groups are absent from the layout, so the header must
+            // come from headerGroups, never from the loop index.
+            const MenuGroup group = layout.headerGroups[index];
             const MenuRect& rect = layout.headers[index];
             const bool open = menuState_.openGroup == group;
 
@@ -689,7 +698,7 @@ void SimulationApp::render() {
                     continue;
                 }
 
-                if (*layout.openGroup == MenuGroup::Seed && seedEditing_ &&
+                if (*layout.openGroup == MenuGroup::Cloud && seedEditing_ &&
                     index == 0) {
                     // Focused typed-seed field (spec D.4) at the row rect:
                     // accent outline + buffer + caret. The caret blinks on
@@ -720,7 +729,7 @@ void SimulationApp::render() {
                 }
 
                 const std::string item = menuItemLabel(
-                    *layout.openGroup, static_cast<int>(index), menuState_.seed);
+                    menuState_, *layout.openGroup, static_cast<int>(index));
                 const bool selected = static_cast<int>(index) == ticked;
                 sf::Text label{*font_};
                 label.setCharacterSize(13U);

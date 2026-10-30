@@ -30,8 +30,9 @@ namespace nbody::app {
 class SimulationApp {
 public:
     // Windowed branch entry point (main.cpp, after the display probe passes).
+    // Seed is the full signed int64 (spec D.3).
     SimulationApp(core::SimulationSetup setup, core::PresetName preset,
-                  std::uint32_t seed, core::IntegratorKind integrator,
+                  std::int64_t seed, core::IntegratorKind integrator,
                   std::string_view title);
 
     SimulationApp(const SimulationApp&) = delete;

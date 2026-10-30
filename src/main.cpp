@@ -132,11 +132,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     const std::string title = windowTitle(*args);
-    // The windowed seed editor still stores u32 (MenuState seed widens to
-    // int64 with the option-menu tasks); the scene itself is already built
-    // from the full int64 seed via the setup above.
+    // The windowed app now carries the full signed int64 seed in MenuState
+    // (spec D.3); the scene itself is already built from it via the setup
+    // above.
     nbody::app::SimulationApp app{
-        std::move(setup), args->preset,
-        static_cast<std::uint32_t>(args->seed), args->integrator, title};
+        std::move(setup), args->preset, args->seed, args->integrator, title};
     return app.run();
 }
