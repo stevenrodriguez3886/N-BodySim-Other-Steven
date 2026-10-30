@@ -77,6 +77,17 @@ TEST_CASE("model_restart_applies_while_paused") {
     REQUIRE(menuStaged(state).empty());
 }
 
+TEST_CASE("model_restart_while_paused_preserves_staged") {
+    MenuState state;
+    REQUIRE(menuApply(state, {MenuGroup::Preset, 3}, true) ==
+            MenuEffect::Staged);
+
+    REQUIRE(menuApply(state, {MenuGroup::Physics, 6}, true) ==
+            MenuEffect::SceneRestart);
+    CHECK(state.restartTick == 1);
+    CHECK(menuStaged(state).preset == PresetName::FigureEight);
+}
+
 TEST_CASE("model_seed_stepper_floors_at_zero") {
     MenuState state;
     state.seed = 0;

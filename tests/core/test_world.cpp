@@ -236,3 +236,25 @@ TEST_CASE("world_set_timestep_changes_advance") {
     CHECK(world.simulationTime() == Approx(1.0 / 60.0).margin(1e-12));
     CHECK(world.timeStep() == Approx(1.0 / 60.0).margin(0.0));
 }
+
+TEST_CASE("world_set_gravity_changes_force") {
+    WorldConfig cfg;
+    cfg.g = 1.0;
+    cfg.softening = 0.0;
+    cfg.timeStep = 1e-6;
+    PhysicsWorld world{cfg, std::make_unique<EulerIntegrator>()};
+    world.reset({
+        Body{1, 1.0, 0.1, Vec2{-1.0, 0.0}, Vec2{0.0, 0.0}},
+        Body{2, 1.0, 0.1, Vec2{1.0, 0.0}, Vec2{0.0, 0.0}},
+    });
+
+    world.step();
+    const double velocityChangeAtG1 = world.bodies()[0].velocity.x;
+
+    world.setGravity(4.0, cfg.softening);
+    world.step();
+    const double velocityChangeAtG4 =
+        world.bodies()[0].velocity.x - velocityChangeAtG1;
+
+    CHECK(velocityChangeAtG4 == Approx(4.0 * velocityChangeAtG1));
+}

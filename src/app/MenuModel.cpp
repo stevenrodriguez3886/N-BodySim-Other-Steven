@@ -7,8 +7,16 @@
 namespace nbody::app {
 namespace {
 
-constexpr std::array<double, 5> kDtValues = {
-    1.0 / 30.0, 1.0 / 60.0, 1.0 / 120.0, 1.0 / 240.0, 1.0 / 480.0};
+struct DtOption {
+    double value;
+    const char* label;
+};
+
+constexpr std::array<DtOption, 5> kDtOptions = {{{1.0 / 30.0, "1/30"},
+                                                {1.0 / 60.0, "1/60"},
+                                                {1.0 / 120.0, "1/120"},
+                                                {1.0 / 240.0, "1/240"},
+                                                {1.0 / 480.0, "1/480"}}};
 
 int presetIndex(core::PresetName preset) {
     switch (preset) {
@@ -108,7 +116,8 @@ MenuEffect menuApply(MenuState& state, const MenuAction& action, bool paused) {
 
         case MenuGroup::Physics:
             if (action.index >= 0 && action.index < 5) {
-                const double dt = kDtValues[static_cast<std::size_t>(action.index)];
+                const double dt =
+                    kDtOptions[static_cast<std::size_t>(action.index)].value;
                 if (paused) {
                     staged.dt = dt;
                     return MenuEffect::Staged;
@@ -186,11 +195,9 @@ const char* menuStagedSummary(const MenuState& state) {
                              integratorIndex(*model.staged.integrator), 0));
     }
     if (model.staged.dt) {
-        for (std::size_t index = 0; index < kDtValues.size(); ++index) {
-            if (*model.staged.dt == kDtValues[index]) {
-                const char* labels[] = {"1/30", "1/60", "1/120", "1/240",
-                                        "1/480"};
-                append(std::string("dt → ") + labels[index]);
+        for (const DtOption& option : kDtOptions) {
+            if (*model.staged.dt == option.value) {
+                append(std::string("dt → ") + option.label);
                 break;
             }
         }
@@ -208,8 +215,8 @@ int menuTickedIndex(const MenuState& state, MenuGroup group) {
         case MenuGroup::Integrator:
             return integratorIndex(state.integrator);
         case MenuGroup::Physics:
-            for (std::size_t index = 0; index < kDtValues.size(); ++index) {
-                if (state.dt == kDtValues[index]) {
+            for (std::size_t index = 0; index < kDtOptions.size(); ++index) {
+                if (state.dt == kDtOptions[index].value) {
                     return static_cast<int>(index);
                 }
             }
