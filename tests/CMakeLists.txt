@@ -29,6 +29,6 @@ add_test(NAME nbody_smoke COMMAND nbody --smoke)
 # run display-free).
 add_executable(nbody_app_tests app/test_args.cpp app/test_camera.cpp
   app/test_step_planning.cpp app/test_menu_bar.cpp app/test_menu_model.cpp
-  app/test_starfield.cpp)
+  app/test_starfield.cpp app/test_text_field.cpp)
 target_link_libraries(nbody_app_tests PRIVATE nbody_app Catch2::Catch2WithMain)
 catch_discover_tests(nbody_app_tests)

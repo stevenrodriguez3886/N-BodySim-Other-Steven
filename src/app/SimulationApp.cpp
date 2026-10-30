@@ -1,5 +1,7 @@
 #include "nbody/app/SimulationApp.hpp"
 
+#include <SFML/Window/Clipboard.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -7,6 +9,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <limits>
+#include <random>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -108,6 +111,7 @@ namespace nbody::app {
 
 SimulationApp::SimulationApp(core::SimulationSetup setup,
                              core::PresetName preset, std::int64_t seed,
+                             std::uint32_t bodies,
                              core::IntegratorKind integrator,
                              std::string_view title)
     : world_{setup.config, core::makeIntegrator(integrator)}
@@ -116,6 +120,10 @@ SimulationApp::SimulationApp(core::SimulationSetup setup,
     menuState_.preset = preset;
     menuState_.integrator = integrator;
     menuState_.seed = seed;
+    // Seed the bodies option from the CLI (--bodies): an R restart rebuilds
+    // through the options-aware builders, so the count survives restarts
+    // (fixes the Task-1-noted bug where windowed restart dropped --bodies).
+    menuState_.bodies = bodies;
     menuState_.dt = setup.config.timeStep;
     world_.reset(std::move(setup.bodies));
     fitCamera();
@@ -123,8 +131,30 @@ SimulationApp::SimulationApp(core::SimulationSetup setup,
 }
 
 void SimulationApp::rebuildScene(bool refitCamera) {
-    core::SimulationSetup setup =
-        core::createPreset(menuState_.preset, menuState_.seed);
+    // Rebuild with the FULL current option set (spec D.2/D.3) via the
+    // per-preset builders instead of createPreset's defaults. Mapping note
+    // (controller ruling): figure-eight scale = separation / 10.0 — the
+    // MenuState separation field is shared with two-body (spec D.3), whose
+    // default 10 means scale 1.0, i.e. the byte-identical classic
+    // choreography (pinned by the core figure-eight default tests).
+    core::SimulationSetup setup{};
+    switch (menuState_.preset) {
+        case core::PresetName::TwoBody:
+            setup = core::twoBody(menuState_.seed, menuState_.separation,
+                                  menuState_.hyperbolic);
+            break;
+        case core::PresetName::SolarSystem:
+            setup = core::solarSystem(menuState_.seed, menuState_.planetCount,
+                                      menuState_.pluto);
+            break;
+        case core::PresetName::FigureEight:
+            setup = core::figureEight(menuState_.seed,
+                                      menuState_.separation / 10.0);
+            break;
+        case core::PresetName::RandomCloud:
+            setup = core::randomCloud(menuState_.seed, menuState_.bodies);
+            break;
+    }
     world_.setGravity(setup.config.g, setup.config.softening);
     world_.reset(std::move(setup.bodies));
     world_.setTimeStep(menuState_.dt);
@@ -138,8 +168,8 @@ void SimulationApp::restartScene() {
     rebuildScene(true);
 }
 
-// The SeedChanged rule, shared by its three sites (handleAction,
-// commitSeedEdit, the Space staged-resume block below): random-cloud
+// The SeedChanged rule, shared by its three sites (applyEffect,
+// commitFieldEdit, the Space staged-resume block below): random-cloud
 // regenerates immediately with the camera preserved (no refit); for every
 // other preset the new seed is merely stored, taking effect on the next
 // random-cloud load. Keep all three sites routed through here.
@@ -150,7 +180,15 @@ void SimulationApp::applySeedEffect() {
 }
 
 void SimulationApp::handleAction(const MenuAction& action) {
-    switch (menuApply(menuState_, action, paused_)) {
+    applyEffect(menuApply(menuState_, action, paused_));
+}
+
+// The single effect-dispatch table (spec D.2 rebuild law): live option
+// effects rebuild immediately WITH camera refit, except the random-cloud
+// Cloud edits (seed/bodies), which rebuild but never refit. Staged/None
+// need no app action; everything else mirrors the previous behavior.
+void SimulationApp::applyEffect(MenuEffect effect) {
+    switch (effect) {
         case MenuEffect::PresetChanged:
             rebuildScene(true);
             break;
@@ -161,39 +199,109 @@ void SimulationApp::handleAction(const MenuAction& action) {
             world_.setTimeStep(menuState_.dt);
             break;
         case MenuEffect::SeedChanged:
+        case MenuEffect::BodiesChanged:  // Cloud-only setter: no-refit rule
             applySeedEffect();
             break;
-        case MenuEffect::SceneRestart:
-            restartScene();
-            break;
-        // Option effects: the rebuild-with-options wiring lands in Task 4
-        // (createPreset still applies defaults; the per-preset option
-        // builders need menuState_'s separation/path/planets/pluto/bodies).
-        case MenuEffect::BodiesChanged:
         case MenuEffect::SeparationChanged:
         case MenuEffect::PathChanged:
         case MenuEffect::PlanetsChanged:
         case MenuEffect::PlutoChanged:
+            rebuildScene(true);  // option edit on a non-cloud preset refits
+            break;
+        case MenuEffect::SceneRestart:
+            restartScene();
+            break;
         case MenuEffect::Staged:
         case MenuEffect::None:
             break;
     }
 }
 
-void SimulationApp::commitSeedEdit() {
-    seedEditing_ = false;
-    // int64 seeds (spec D.3): today's editor buffer is digits-only up to 10
-    // chars, so the value always fits; Task 4 extends the grammar to the
-    // signed 19-char field with saturation. An empty buffer parses as 0.
-    const std::int64_t value = std::strtoll(seedBuffer_.c_str(), nullptr, 10);
+// Focus the shared inline editor on a field row (spec D.4), pre-filled
+// with the field's current value rendered like its row label. The dropdown
+// stays open; Enter commits, Esc ends the edit only, click-away cancels.
+void SimulationApp::openFieldEditor(TextField field) {
+    activeField_ = field;
+    fieldBuffer_.clear();
+    // Dwell bookkeeping: focusing a field is a click, and clicks hide
+    // tooltips (D.6); the next MouseMoved re-targets.
+    tooltipTarget_ = {};
+    tooltipText_.clear();
+    switch (field) {
+        case TextField::Seed:
+            fieldBuffer_ = fieldInitialSeed(menuState_.seed);
+            break;
+        case TextField::Bodies:
+            fieldBuffer_ = fieldInitialBodies(menuState_.bodies);
+            break;
+        case TextField::Separation:
+            fieldBuffer_ = fieldInitialSeparation(menuState_.separation);
+            break;
+        case TextField::Planets:
+            fieldBuffer_ = fieldInitialPlanets(menuState_.planetCount);
+            break;
+    }
+}
+
+void SimulationApp::commitFieldEdit() {
+    const TextField field = *activeField_;
+    activeField_.reset();
     // The SAME staging law as every other group: live when running, staged
-    // (Space-resume applies it last, after preset/integrator/dt) when paused.
-    const MenuEffect effect = menuSetSeed(menuState_, value, paused_);
+    // (Space-resume applies it last, after preset/integrator/dt) when
+    // paused. Each field routes to its own setter; parsing (incl. the
+    // int64 saturation and the empty-commits-0 law) lives in TextField.cpp.
+    MenuEffect effect = MenuEffect::None;
+    switch (field) {
+        case TextField::Seed:
+            effect = menuSetSeed(menuState_, fieldParseSeed(fieldBuffer_),
+                                 paused_);
+            break;
+        case TextField::Bodies:
+            effect = menuSetBodies(menuState_, fieldParseBodies(fieldBuffer_),
+                                   paused_);
+            break;
+        case TextField::Separation:
+            effect = menuSetSeparation(
+                menuState_, fieldParseSeparation(fieldBuffer_), paused_);
+            break;
+        case TextField::Planets:
+            effect =
+                menuSetPlanets(menuState_, fieldParsePlanets(fieldBuffer_),
+                               paused_);
+            break;
+    }
+    fieldBuffer_.clear();
     // Same dropdown-close behavior as activating any other item, whether
     // the change applied live or staged.
     menuState_.openGroup.reset();
-    if (effect == MenuEffect::SeedChanged) {
-        applySeedEffect();
+    applyEffect(effect);
+}
+
+// Ctrl+C/X/V while a field is focused (spec D.4). Copy takes the buffer,
+// cut copies then clears, paste REPLACES the buffer with the clipboard
+// filtered through the field grammar (same overflow rules as typing).
+// Any other Ctrl combo is swallowed without touching the buffer.
+void SimulationApp::handleFieldClipboard(const sf::Event::KeyPressed& key) {
+    if (!activeField_) {
+        return;
+    }
+    using Key = sf::Keyboard::Key;
+    switch (key.code) {
+        case Key::C:
+            sf::Clipboard::setString(fieldBuffer_);
+            break;
+        case Key::X:
+            sf::Clipboard::setString(fieldBuffer_);
+            fieldBuffer_.clear();
+            break;
+        case Key::V: {
+            const sf::String clip = sf::Clipboard::getString();
+            fieldBuffer_ =
+                fieldSanitizePaste(*activeField_, clip.toAnsiString());
+            break;
+        }
+        default:
+            break;  // Ctrl+anything else: swallowed, never typed
     }
 }
 
@@ -220,16 +328,35 @@ void SimulationApp::handleMenuHit(const MenuHit& hit, core::Vec2 position) {
         }
     }
 
-    if (hit.group == MenuGroup::Cloud && hit.index == 0) {
-        // The seed row is an input field, not an action (spec D.4): focus
-        // the inline editor, pre-filled with the current seed. The dropdown
-        // stays open; commit closes it, Esc keeps it, click-away cancels.
-        seedEditing_ = true;
-        seedBuffer_ = std::to_string(menuState_.seed);
+    // Clicking a field row focuses the shared inline editor instead of
+    // activating an action (spec D.4): the dropdown stays open, commit
+    // closes it, Esc keeps it, click-away cancels.
+    if (const std::optional<TextField> field =
+            fieldForItem(hit.group, hit.index, menuState_.preset)) {
+        openFieldEditor(*field);
         return;
     }
 
     menuState_.openGroup.reset();
+    if (hit.group == MenuGroup::Cloud &&
+        (hit.index == 1 || hit.index == 3)) {
+        // Cloud roll buttons (spec D.2): fresh random_device values routed
+        // through the SAME setters as the typed fields (staging law
+        // included). Seed: full int64 range; bodies: uniform [2, 2000].
+        std::random_device rd;
+        MenuEffect effect = MenuEffect::None;
+        if (hit.index == 1) {
+            std::uniform_int_distribution<std::int64_t> seedDist(
+                std::numeric_limits<std::int64_t>::min(),
+                std::numeric_limits<std::int64_t>::max());
+            effect = menuSetSeed(menuState_, seedDist(rd), paused_);
+        } else {
+            std::uniform_int_distribution<std::uint32_t> bodiesDist(2, 2000);
+            effect = menuSetBodies(menuState_, bodiesDist(rd), paused_);
+        }
+        applyEffect(effect);
+        return;
+    }
     handleAction({hit.group, hit.index});
 }
 
@@ -258,62 +385,83 @@ void SimulationApp::handleEvents() {
             window_.close();
             continue;
         }
-        // Seed editor priority (Review Focus 4): the delivery ORDER of
+        // Field editor priority (Review Focus 4): the delivery ORDER of
         // TextEntered vs the matching KeyPressed varies by platform (on
         // X11, WindowImplX11 pushes KeyPressed before TextEntered) -- never
         // rely on it here. Correctness is order-independent because the two
         // editing branches are disjoint: the TextEntered branch consumes
-        // only digits, the KeyPressed branch only Enter/Escape/Backspace
-        // (plus swallowing all other keys while editing), so no input can
+        // only grammar-valid chars (the shared fieldAppendChar), the
+        // KeyPressed branch only Enter/Escape/Backspace/Ctrl+CXV (plus
+        // swallowing all other keys while editing), so no input can
         // double-handle under either platform order.
-        if (seedEditing_) {
+        if (activeField_) {
             if (const auto* text = ev->getIf<sf::Event::TextEntered>()) {
                 const char32_t ch = text->unicode;
-                if (ch >= U'0' && ch <= U'9' && seedBuffer_.size() < 10) {
-                    seedBuffer_.push_back(static_cast<char>(ch));
-                    while (seedBuffer_.size() > 1 &&
-                           seedBuffer_.front() == '0') {
-                        seedBuffer_.erase(seedBuffer_.begin());  // trim lead 0s
-                    }
+                if (ch >= U' ' && ch < U'\x7f') {
+                    fieldAppendChar(*activeField_,
+                                    static_cast<char>(ch), fieldBuffer_);
                 }
-                // Every other printable codepoint (incl. Enter's \r and
-                // Backspace's 8/127, ctrl chars >= 0x80) is ignored here.
+                // Every other codepoint (control chars incl. Enter/Backspace
+                // and the Ctrl combos' 0x03/0x18/0x16, plus >= 0x80) is
+                // ignored here: Ctrl combos NEVER type into the buffer.
                 continue;
             }
         }
         if (const auto* key = ev->getIf<sf::Event::KeyPressed>()) {
-            if (seedEditing_) {
-                if (key->code == sf::Keyboard::Key::Escape) {
+            if (activeField_) {
+                if (key->control) {
+                    // Ctrl+C/X/V clipboard routing; every other Ctrl combo
+                    // is swallowed (never typed, never an app shortcut).
+                    handleFieldClipboard(*key);
+                } else if (key->code == sf::Keyboard::Key::Escape) {
                     // Cancel the EDIT ONLY: the dropdown stays open and the
                     // app survives -- deliberately no fall-through to the
                     // dropdown-close/quit Escape law below.
-                    seedEditing_ = false;
+                    activeField_.reset();
+                    fieldBuffer_.clear();
                 } else if (key->code == sf::Keyboard::Key::Backspace) {
-                    if (!seedBuffer_.empty()) {
-                        seedBuffer_.pop_back();  // empty buffer commits 0
-                    }
+                    fieldBackspace(*activeField_, fieldBuffer_);  // empty
+                    // buffer commits 0
                 } else if (key->code == sf::Keyboard::Key::Enter) {
-                    commitSeedEdit();
+                    commitFieldEdit();
                 }
                 // Any other key (Space, R, letters, ...) is swallowed here:
                 // typing must never pause (Space) or restart (R) the scene.
                 continue;
             }
             if (key->code == sf::Keyboard::Key::Escape) {
+                hideTooltip();  // menu-close hides tooltips (D.6)
                 if (menuState_.openGroup) {
                     menuState_.openGroup.reset();
                 } else {
                     window_.close();
                 }
             } else if (key->code == sf::Keyboard::Key::Space) {
+                hideTooltip();  // a menu close (staged chip disappears) hides
                 if (paused_) {
                     const MenuStaged staged = menuTakeStaged(menuState_);
                     // Consumption order (spec D.3): preset (rebuilds with
-                    // the option values) -> integrator -> dt -> seed ->
-                    // bodies. The staged option fields (separation/path/
-                    // planets/pluto) fold into the preset rebuild step —
-                    // Task 4 wires that plus the staged.bodies tail; the
-                    // model already carries them.
+                    // the FULL current options) -> integrator -> dt -> seed
+                    // -> bodies. While paused the setters only wrote the
+                    // staged mirrors (live option fields untouched), so the
+                    // option mirrors fold into the live state FIRST — the
+                    // preset step's rebuild must already use them ("option
+                    // rebuilds folded into the preset step", D.3).
+                    if (staged.bodies) {
+                        menuState_.bodies = *staged.bodies;
+                    }
+                    if (staged.separation) {
+                        menuState_.separation = *staged.separation;
+                    }
+                    if (staged.hyperbolic) {
+                        menuState_.hyperbolic = *staged.hyperbolic;
+                    }
+                    if (staged.planets) {
+                        menuState_.planetCount = *staged.planets;
+                    }
+                    if (staged.pluto) {
+                        menuState_.pluto = *staged.pluto;
+                    }
                     if (staged.preset) {
                         menuState_.preset = *staged.preset;
                         rebuildScene(true);
@@ -332,6 +480,23 @@ void SimulationApp::handleEvents() {
                         menuState_.seed = *staged.seed;
                         applySeedEffect();
                     }
+                    // The staged option tail (bodies/separation/path/
+                    // planets/pluto): any mirror set (even without a staged
+                    // preset) requires a rebuild with the new option values.
+                    // Refit law per D.2: a staged bodies change is a
+                    // random-cloud Cloud edit and never refits; every other
+                    // option edit refits.
+                    if (!staged.preset &&
+                        (staged.bodies || staged.separation ||
+                         staged.hyperbolic || staged.planets ||
+                         staged.pluto)) {
+                        const bool cloudOnly =
+                            staged.bodies && !staged.separation &&
+                            !staged.hyperbolic && !staged.planets &&
+                            !staged.pluto &&
+                            menuState_.preset == core::PresetName::RandomCloud;
+                        rebuildScene(!cloudOnly);
+                    }
                 }
                 paused_ = !paused_;  // rendering continues while paused
             } else if (key->code == sf::Keyboard::Key::R) {
@@ -345,31 +510,37 @@ void SimulationApp::handleEvents() {
         const auto* move = ev->getIf<sf::Event::MouseMoved>();
         const sf::Vector2u size = window_.getSize();
         if (wheel != nullptr) {
+            hideTooltip();  // scroll hides tooltips (D.6)
             camera_.zoomAt(core::Vec2{static_cast<double>(wheel->position.x),
                                       static_cast<double>(wheel->position.y)},
                            static_cast<double>(wheel->delta),
                            static_cast<double>(size.x),
                            static_cast<double>(size.y));
         } else if (press != nullptr) {
+            hideTooltip();  // any click hides the tooltip (D.6)
             const core::Vec2 position{static_cast<double>(press->position.x),
                                       static_cast<double>(press->position.y)};
             const MenuLayout layout = menuLayout(
                 static_cast<double>(size.x), static_cast<double>(size.y),
                 menuState_.openGroup, menuState_.preset);
             const MenuHit hit = menuHitTest(layout, position);
-            if (seedEditing_) {
+            if (activeField_) {
+                // The focused field's own row (and its group header) keep
+                // focus; anywhere else the edit is cancelled first, then
+                // the click falls through to normal handling below -- menu
+                // hit or drag start, no early return (D.4).
                 const bool inField =
-                    (hit.kind == MenuHitKind::Item &&
-                     hit.group == MenuGroup::Cloud && hit.index == 0) ||
-                    (hit.kind == MenuHitKind::Header &&
-                     hit.group == MenuGroup::Cloud);
-                if (inField && press->button == sf::Mouse::Button::Left) {
+                    press->button == sf::Mouse::Button::Left &&
+                    ((hit.kind == MenuHitKind::Item &&
+                      fieldForItem(hit.group, hit.index, menuState_.preset) ==
+                          *activeField_) ||
+                     (hit.kind == MenuHitKind::Header &&
+                      menuGroupOfField(*activeField_) == hit.group));
+                if (inField) {
                     continue;  // click inside the field: focus stays, no-op
                 }
-                // Click-away: cancel the edit (discard the buffer), then
-                // let the click itself fall through to normal handling
-                // below -- menu hit or drag start, no early return (D.4).
-                seedEditing_ = false;
+                activeField_.reset();
+                fieldBuffer_.clear();
             }
             if (press->button == sf::Mouse::Button::Left &&
                 hit.kind != MenuHitKind::None) {
@@ -394,8 +565,46 @@ void SimulationApp::handleEvents() {
                                                    lastMouse_.y)});
             }
             lastMouse_ = move->position;
+            // Tooltip target = header/row under the cursor, recomputed on
+            // every move; a target CHANGE restarts the 0.5 s dwell (D.6).
+            // Hovering never touches selection/highlight (menuState_ is
+            // read-only here).
+            updateTooltipTarget();
         }
     }
+}
+
+namespace {
+// MenuHit identity for dwell bookkeeping: same cell under the cursor.
+bool sameHit(const MenuHit& a, const MenuHit& b) {
+    return a.kind == b.kind && a.group == b.group && a.index == b.index;
+}
+}  // namespace
+
+void SimulationApp::updateTooltipTarget() {
+    const sf::Vector2u size = window_.getSize();
+    const MenuLayout layout = menuLayout(
+        static_cast<double>(size.x), static_cast<double>(size.y),
+        menuState_.openGroup, menuState_.preset);
+    const core::Vec2 cursor{static_cast<double>(lastMouse_.x),
+                            static_cast<double>(lastMouse_.y)};
+    const MenuHit hit = menuHitTest(layout, cursor);
+    std::string text;
+    if (hit.kind == MenuHitKind::Header) {
+        text = menuHeaderTooltip(hit.group);
+    } else if (hit.kind == MenuHitKind::Item) {
+        text = menuItemTooltip(hit.group, hit.index, menuState_);
+    }
+    if (!sameHit(hit, tooltipTarget_)) {
+        tooltipTarget_ = hit;
+        tooltipClock_.restart();  // target change resets the dwell (D.6)
+    }
+    tooltipText_ = std::move(text);
+}
+
+void SimulationApp::hideTooltip() {
+    tooltipTarget_ = {};
+    tooltipText_.clear();
 }
 
 void SimulationApp::update(sf::Time frameTime) {
@@ -698,9 +907,10 @@ void SimulationApp::render() {
                     continue;
                 }
 
-                if (*layout.openGroup == MenuGroup::Cloud && seedEditing_ &&
-                    index == 0) {
-                    // Focused typed-seed field (spec D.4) at the row rect:
+                if (activeField_ &&
+                    fieldForItem(*layout.openGroup, static_cast<int>(index),
+                                 menuState_.preset) == *activeField_) {
+                    // Focused typed field (spec D.4) at the row rect:
                     // accent outline + buffer + caret. The caret blinks on
                     // the existing statsClock_ 0.5 s period (shown for its
                     // first half, hidden for its second).
@@ -720,7 +930,7 @@ void SimulationApp::render() {
                     sf::Text typed{*font_};
                     typed.setCharacterSize(13U);
                     typed.setFillColor(kHudColor);
-                    typed.setString(seedBuffer_ + (caretOn ? "|" : " "));
+                    typed.setString(fieldBuffer_ + (caretOn ? "|" : " "));
                     typed.setPosition(sf::Vector2f{
                         static_cast<float>(rect.topLeft.x + 8.0),
                         static_cast<float>(rect.topLeft.y + 3.0)});
@@ -772,6 +982,45 @@ void SimulationApp::render() {
             window_.draw(chip);
         }
     }
+
+    // Tooltips draw LAST, above the staged chip (spec D.6).
+    renderTooltip();
+}
+
+// Hover tooltip box (spec D.6): bg rgb(30,34,54) alpha 240, 1 px border,
+// 11 px text, at cursor+(12,18), clamped on-screen. Shown once the cursor
+// has dwelled 0.5 s on an unchanged header/row target (the clock was last
+// restarted by updateTooltipTarget on a target change).
+void SimulationApp::renderTooltip() {
+    if (!font_ || tooltipText_.empty()) {
+        return;
+    }
+    if (tooltipClock_.getElapsedTime().asSeconds() < 0.5) {
+        return;
+    }
+    sf::Text tip{*font_};
+    tip.setCharacterSize(11U);
+    tip.setFillColor(kHudColor);
+    tip.setString(tooltipText_);
+    const sf::FloatRect bounds = tip.getLocalBounds();
+    constexpr float kPad = 5.0F;
+    const sf::Vector2f boxSize{bounds.size.x + 2.0F * kPad,
+                               bounds.size.y + 2.0F * kPad};
+    const sf::Vector2u size = window_.getSize();
+    float x = static_cast<float>(lastMouse_.x) + 12.0F;
+    float y = static_cast<float>(lastMouse_.y) + 18.0F;
+    x = std::min(x, static_cast<float>(size.x) - boxSize.x - 2.0F);
+    y = std::min(y, static_cast<float>(size.y) - boxSize.y - 2.0F);
+    x = std::max(2.0F, x);
+    y = std::max(2.0F, y);
+    sf::RectangleShape box{boxSize};
+    box.setPosition(sf::Vector2f{x, y});
+    box.setFillColor(sf::Color(30, 34, 54, 240));
+    box.setOutlineThickness(1.0F);
+    box.setOutlineColor(kMenuBorderColor);
+    window_.draw(box);
+    tip.setPosition(sf::Vector2f{x + kPad, y + kPad});
+    window_.draw(tip);
 }
 
 int SimulationApp::run() {

@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
     // The windowed app now carries the full signed int64 seed in MenuState
     // (spec D.3); the scene itself is already built from it via the setup
     // above.
-    nbody::app::SimulationApp app{
-        std::move(setup), args->preset, args->seed, args->integrator, title};
+    nbody::app::SimulationApp app{std::move(setup), args->preset, args->seed,
+                                  args->bodies, args->integrator, title};
     return app.run();
 }

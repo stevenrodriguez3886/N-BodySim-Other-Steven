@@ -12,6 +12,7 @@
 #include "nbody/app/MenuBar.hpp"
 #include "nbody/app/MenuModel.hpp"
 #include "nbody/app/Starfield.hpp"
+#include "nbody/app/TextField.hpp"
 #include "nbody/core/Body.hpp"
 #include "nbody/core/PhysicsWorld.hpp"
 #include "nbody/core/Presets.hpp"
@@ -30,10 +31,11 @@ namespace nbody::app {
 class SimulationApp {
 public:
     // Windowed branch entry point (main.cpp, after the display probe passes).
-    // Seed is the full signed int64 (spec D.3).
+    // Seed is the full signed int64 (spec D.3); bodies seeds the random-cloud
+    // option so an R restart keeps --bodies (CLI default 150).
     SimulationApp(core::SimulationSetup setup, core::PresetName preset,
-                  std::int64_t seed, core::IntegratorKind integrator,
-                  std::string_view title);
+                  std::int64_t seed, std::uint32_t bodies,
+                  core::IntegratorKind integrator, std::string_view title);
 
     SimulationApp(const SimulationApp&) = delete;
     SimulationApp& operator=(const SimulationApp&) = delete;
@@ -44,12 +46,18 @@ private:
     void handleEvents();
     void handleMenuHit(const MenuHit& hit, core::Vec2 position);
     void handleAction(const MenuAction& action);
-    void commitSeedEdit();
+    void applyEffect(MenuEffect effect);  // the D.2 effect-dispatch table
+    void openFieldEditor(TextField field);
+    void commitFieldEdit();
+    void handleFieldClipboard(const sf::Event::KeyPressed& key);
     void restartScene();
     void rebuildScene(bool refitCamera);
     void applySeedEffect();  // the shared SeedChanged rule (see .cpp)
     void update(sf::Time frameTime);
     void render();
+    void renderTooltip();  // drawn last, above the staged chip (D.6)
+    void updateTooltipTarget();  // header/row under the cursor (D.6)
+    void hideTooltip();          // click/scroll/menu-close hide rules (D.6)
     void updateStats();
 
     core::PhysicsWorld world_;
@@ -60,13 +68,20 @@ private:
     std::optional<sf::Font> font_;  // nullopt -> in-window text skipped, title only
     bool paused_ = false;
     bool dragging_ = false;
-    // Inline typed seed field of the Seed dropdown (spec D.4): focused by
-    // clicking its single row. Digits only (max 10), Enter commits through
-    // the staging law, Esc cancels the edit only, click-away cancels then
-    // processes. The caret blink reuses statsClock_'s 0.5 s period.
-    bool seedEditing_ = false;
-    std::string seedBuffer_;
-    sf::Vector2i lastMouse_{0, 0};
+    // One parameterized inline text editor shared by every field row
+    // (spec D.4): nullopt = no field focused. Enter commits through the
+    // staging law, Esc cancels the edit only, click-away cancels then
+    // processes, Ctrl+C/X/V go to the clipboard (paste grammar-filtered).
+    // The caret blink reuses statsClock_'s 0.5 s period.
+    std::optional<TextField> activeField_;
+    std::string fieldBuffer_;
+    // Hover tooltip state (spec D.6): target last resolved on MouseMoved
+    // (header or open-group row under the cursor); the dwell clock restarts
+    // whenever the target changes. Empty text = nothing to show.
+    MenuHit tooltipTarget_;
+    std::string tooltipText_;
+    sf::Clock tooltipClock_;  // dwell timer; restarted on target change
+    sf::Vector2i lastMouse_{0, 0};  // tooltip anchors at cursor+(12,18)
     double accumulator_ = 0.0;
 
     // 0.5 s stats window (plan D.2): frames counted here, steps via
