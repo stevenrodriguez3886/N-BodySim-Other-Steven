@@ -23,4 +23,8 @@ StepPlan planSteps(double accumulator, double frameTime, double dt) {
     return StepPlan{steps, acc};
 }
 
+std::uint64_t stepsSince(std::uint64_t current, std::uint64_t last) {
+    return current >= last ? current - last : 0U;
+}
+
 }  // namespace nbody::app

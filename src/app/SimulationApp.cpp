@@ -631,7 +631,8 @@ void SimulationApp::updateStats() {
     const double secs = statsClock_.restart().asSeconds();
     const std::uint64_t steps = world_.totalSteps();
     const double ups = secs > 0.0
-                           ? static_cast<double>(steps - lastTotalSteps_) / secs
+                           ? static_cast<double>(
+                                 stepsSince(steps, lastTotalSteps_)) / secs
                            : 0.0;
     const double fps = secs > 0.0 ? framesInWindow_ / secs : 0.0;
     lastTotalSteps_ = steps;

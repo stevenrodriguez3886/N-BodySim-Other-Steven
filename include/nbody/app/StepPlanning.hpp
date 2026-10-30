@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace nbody::app {
 
 // Fixed-timestep accumulator math (plan D.2), kept as a free pure function
@@ -23,5 +25,12 @@ struct StepPlan {
 };
 
 StepPlan planSteps(double accumulator, double frameTime, double dt);
+
+// Steps executed since the previous stats sample. world_.reset() zeroes the
+// world's step counter, so after any rebuild `current` is legitimately
+// below the stale `last`: clamp to 0 instead of letting the unsigned
+// subtraction wrap (the D.7 R-stall probe caught the wrap rendering
+// garbage UPS in the title bar for one stats window after each restart).
+std::uint64_t stepsSince(std::uint64_t current, std::uint64_t last);
 
 }  // namespace nbody::app

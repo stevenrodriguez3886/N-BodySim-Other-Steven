@@ -10,6 +10,20 @@ using Catch::Approx;
 using nbody::app::kMaxFrameTime;
 using nbody::app::kMaxStepsFrame;
 using nbody::app::planSteps;
+using nbody::app::stepsSince;
+
+TEST_CASE("stepsSince clamps the post-restart counter reset") {
+    // D.7 R-stall probe regression: world_.reset() zeroes totalSteps, so
+    // the next stats sample legitimately sees current < last. The raw
+    // unsigned subtraction wrapped to ~2^64 and rendered garbage UPS
+    // ("3.7e19"-class values) in the title bar after every restart.
+    CHECK(stepsSince(120, 60) == 60U);       // normal growth
+    CHECK(stepsSince(60, 60) == 0U);          // idle window
+    CHECK(stepsSince(0, 121) == 0U);          // restart: never wraps
+    CHECK(stepsSince(4, 121) == 0U);          // few steps after restart
+    CHECK(stepsSince(1, 18446744073709551615ULL) ==
+          0U);  // worst-case stale sample
+}
 
 TEST_CASE("StepPlanning constants match plan D.2") {
     REQUIRE(kMaxFrameTime == 0.25);
