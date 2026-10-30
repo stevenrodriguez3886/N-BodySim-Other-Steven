@@ -41,8 +41,9 @@ constexpr double kMenuStripBottom = 34.0;
 // SFML 3.0.x has NO Font::getDefault() (that is a later 3.1/master API;
 // verified against build/_deps/sfml-src/include/SFML/Graphics/Font.hpp — the
 // only statics there are glyph/texture accessors). So the plan's "belt"
-// applies: try a few well-known system font files; if none loads, HUD text
-// is skipped and stats stay title-bar-only.
+// applies: try a few well-known system font files; if none loads, all
+// in-window text (menu labels, chip, seed field) is skipped and stats stay
+// title-bar-only.
 std::optional<sf::Font> loadHudFont() {
     static const char* kCandidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",

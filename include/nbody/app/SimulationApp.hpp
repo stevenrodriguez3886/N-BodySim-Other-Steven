@@ -57,7 +57,7 @@ private:
     std::vector<Star> stars_{starfield()};  // world-locked, generated once
     sf::RenderWindow window_;
     sf::Clock frameClock_;
-    std::optional<sf::Font> font_;  // nullopt -> HUD text skipped, title only
+    std::optional<sf::Font> font_;  // nullopt -> in-window text skipped, title only
     bool paused_ = false;
     bool dragging_ = false;
     // Inline typed seed field of the Seed dropdown (spec D.4): focused by
