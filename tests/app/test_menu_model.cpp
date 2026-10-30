@@ -81,11 +81,22 @@ TEST_CASE("model_restart_while_paused_preserves_staged") {
     MenuState state;
     REQUIRE(menuApply(state, {MenuGroup::Preset, 3}, true) ==
             MenuEffect::Staged);
+    REQUIRE(menuApply(state, {MenuGroup::Integrator, 1}, true) ==
+            MenuEffect::Staged);
+    REQUIRE(menuApply(state, {MenuGroup::Physics, 0}, true) ==
+            MenuEffect::Staged);
+    REQUIRE(menuApply(state, {MenuGroup::Seed, 1}, true) ==
+            MenuEffect::Staged);
 
     REQUIRE(menuApply(state, {MenuGroup::Physics, 6}, true) ==
             MenuEffect::SceneRestart);
     CHECK(state.restartTick == 1);
     CHECK(menuStaged(state).preset == PresetName::FigureEight);
+    CHECK(menuStaged(state).integrator.has_value());
+    CHECK(menuStaged(state).integrator.value_or(
+              IntegratorKind::Rk4) == IntegratorKind::Euler);
+    CHECK(menuStaged(state).dt == 1.0 / 30.0);
+    CHECK(menuStaged(state).seed == state.seed + 1);
 }
 
 TEST_CASE("model_seed_stepper_floors_at_zero") {
