@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-29-visual-overhaul-seed-editor.md` (binding). Mockup: `docs/mockups/solar-look.html` (choice C).
 
+**Pre-flight (already done on this branch):** `cd19750` flat bar / single selection indicator / dropdown over HUD, and `70e030e` dropped the open-tab underline entirely and swapped the ✓ glyph (rendered as tofu boxes) for a drawn green dot in the row gutter. Menu strip rendering starts from that state; do NOT reintroduce the underline or a check glyph.
+
 ## Global Constraints
 
 - C++17; warning-free as today (`-Wall -Wextra -Wpedantic`); `nbody_core` SFML-free; `nbody_app` SFML PRIVATE.
