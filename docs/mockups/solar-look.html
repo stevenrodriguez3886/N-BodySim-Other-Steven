@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>nbody — solar system look + seed editor mockup</title>
+<style>
+  :root { --bg:#0a0c18; --panel:#161926; --line:#2c3050; --text:#dcdce6; --dim:#888ca0; --accent:#78beff; }
+  * { box-sizing:border-box; }
+  body { background:#05060c; color:var(--text); font:14px/1.5 system-ui, sans-serif; margin:0; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--dim); margin-bottom:22px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:18px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .card h2 { font-size:14px; margin:0; padding:10px 14px; border-bottom:1px solid var(--line); background:#11131f; }
+  .card h2 span.tag { float:right; color:var(--accent); font-weight:600; }
+  .scene { position:relative; height:300px; background:var(--bg); overflow:hidden; }
+  .note { padding:10px 14px; color:var(--dim); font-size:12.5px; border-top:1px solid var(--line); }
+  .note b { color:var(--text); }
+  /* stars */
+  .star { position:absolute; background:#cfd6ff; border-radius:50%; opacity:.5; }
+  .star.bright { opacity:.9; }
+  /* bodies */
+  .b { position:absolute; border-radius:50%; transform:translate(-50%,-50%); }
+  .sun { width:30px; height:30px; background:radial-gradient(circle at 40% 40%, #fff6d8, #ffd75e 45%, #ff9d3a 75%, #ff8a1e);
+         box-shadow:0 0 26px 10px rgba(255,190,80,.35), 0 0 60px 26px rgba(255,150,40,.15); }
+  .ring::after { content:""; position:absolute; left:50%; top:50%; width:230%; height:70%;
+         transform:translate(-50%,-50%) rotate(-18deg); border:2px solid rgba(222,196,150,.75);
+         border-radius:50%; border-top-color:rgba(222,196,150,.25); }
+  .lit { box-shadow:inset -3px -2px 4px rgba(0,0,0,.55); }
+  /* seed editor mock */
+  .seedwrap { padding:16px 14px; }
+  .bar { display:flex; gap:6px; align-items:center; background:#0a0c18cc; border-radius:6px; padding:4px 6px; width:fit-content; }
+  .hdr { padding:4px 10px; color:var(--dim); font-size:12px; }
+  .hdr.open { color:var(--text); border-bottom:2px solid var(--accent); }
+  .drop { margin-top:6px; width:150px; background:#161926f2; border:1px solid var(--line); border-radius:6px; padding:8px; }
+  .input { display:flex; align-items:center; background:#0d0f1a; border:1px solid var(--accent); border-radius:4px; padding:4px 8px; font:13px ui-monospace,monospace; color:var(--text); width:100%; }
+  .caret { display:inline-block; width:1px; height:14px; background:var(--accent); animation:blink 1s steps(1) infinite; margin-left:1px; }
+  @keyframes blink { 50% { opacity:0; } }
+  .keys { margin-top:8px; color:var(--dim); font-size:11.5px; }
+  kbd { background:#232740; border:1px solid var(--line); border-radius:3px; padding:0 5px; font:11px ui-monospace,monospace; color:var(--text); }
+  .chip { position:absolute; top:8px; right:10px; background:#282e42f0; padding:4px 10px; border-radius:5px; font-size:11.5px; color:#b8c4e8; }
+</style>
+</head>
+<body>
+<h1>Solar system look + seed editor — pick your favorites</h1>
+<div class="sub">All variants keep the physics exactly as-is (invisible change only in how bodies are drawn). Stars are a fixed deterministic starfield, dimmed so bodies stay readable.</div>
+
+<div class="grid">
+  <!-- Option A -->
+  <div class="card">
+    <h2>A · Flat &amp; clean <span class="tag">simplest</span></h2>
+    <div class="scene" id="sceneA"></div>
+    <div class="note"><b>True planet colors + glow on the sun.</b> Planets drawn at a guaranteed minimum pixel size (never sub-pixel), flat fill. Sun gets a soft radial glow. No shading, no rings — crisp and readable at any zoom.</div>
+  </div>
+
+  <!-- Option B -->
+  <div class="card">
+    <h2>B · Shaded + Saturn ring <span class="tag">recommended</span></h2>
+    <div class="scene" id="sceneB"></div>
+    <div class="note"><b>A with day/night shading</b> (planets darken on the far side from the sun) <b>+ a ring for Saturn</b>. Still cheap to draw: one inner shadow per planet, one ellipse for the ring. Reads instantly as "planets".</div>
+  </div>
+
+  <!-- Option C -->
+  <div class="card">
+    <h2>C · Banded gas giants <span class="tag">max flavor</span></h2>
+    <div class="scene" id="sceneC"></div>
+    <div class="note"><b>B + horizontal bands</b> on Jupiter/Saturn (and faint ones on Uranus/Neptune), drawn as 2–3 clipped stripes. Most realistic, slightly busiest at small sizes.</div>
+  </div>
+
+  <!-- Seed editor -->
+  <div class="card">
+    <h2>Random seed → typed number <span class="tag">all options</span></h2>
+    <div class="scene" style="height:auto;min-height:170px;">
+      <div class="seedwrap">
+        <div class="bar">
+          <span class="hdr">Preset: solar-system</span><span class="hdr">Integrator: rk4</span><span class="hdr">Physics: 1/120</span><span class="hdr open">Random seed: 42</span>
+        </div>
+        <div class="drop">
+          <div class="input">1234<span class="caret"></span></div>
+          <div class="keys"><kbd>Enter</kbd> apply &nbsp;·&nbsp; <kbd>Esc</kbd> cancel &nbsp;·&nbsp; digits only, capped at 4,294,967,295</div>
+        </div>
+      </div>
+      <div class="chip">staged → seed → 1234</div>
+    </div>
+    <div class="note">Click the header, a focused number field drops down — type the seed, <b>Enter</b> commits (live while running, staged-then-applied while paused, same rules as everything else), <b>Esc</b> cancels. The ± buttons are gone.</div>
+  </div>
+</div>
+
+<script>
+const planets = [
+  {name:'Mercury', color:'#9c8e82', size:5,  ax:.07,  bx:.10},
+  {name:'Venus',   color:'#e6c47a', size:7,  ax:.14,  bx:.24},
+  {name:'Earth',   color:'#5f8dd6', size:7,  ax:.20,  bx:.66},
+  {name:'Mars',    color:'#c96a4a', size:6,  ax:.27,  bx:.35},
+  {name:'Jupiter', color:'#d8a568', size:14, ax:.40,  bx:.78},
+  {name:'Saturn',  color:'#e3ce9a', size:12, ax:.55,  bx:.20},
+  {name:'Uranus',  color:'#9ad6d2', size:9,  ax:.70,  bx:.70},
+  {name:'Neptune', color:'#5a7bd6', size:9,  ax:.86,  bx:.52},
+];
+const starColors = ['#cfd6ff','#fff','#ffe9c9','#cfe8ff'];
+function stars(el, n){
+  let s = 42; const rnd = () => (s = (s*1103515245+12345) & 0x7fffffff) / 0x7fffffff;
+  for (let i=0;i<n;i++){
+    const d=document.createElement('div'); d.className='star'+(rnd()>.85?' bright':'');
+    const sz = rnd()>.9?2:1;
+    d.style.cssText=`left:${(rnd()*100).toFixed(1)}%;top:${(rnd()*100).toFixed(1)}%;width:${sz}px;height:${sz}px;opacity:${(.2+rnd()*.5).toFixed(2)};background:${starColors[(rnd()*4)|0]}`;
+    el.appendChild(d);
+  }
+}
+function place(el, style, lit){
+  const sun=document.createElement('div');
+  sun.className='b sun'; sun.style.left='50%'; sun.style.top='50%'; el.appendChild(sun);
+  for(const p of planets){
+    const d=document.createElement('div'); d.className='b';
+    d.style.cssText=`left:${p.ax*100}%;top:${p.bx*100}%;width:${p.size}px;height:${p.size}px;background:${p.color}`;
+    if(lit) d.classList.add('lit');
+    if(p.name==='Saturn' && style!=='A') d.classList.add('ring');
+    if(style==='C' && (p.name==='Jupiter'||p.name==='Saturn'))
+      d.style.background=`repeating-linear-gradient(180deg, ${p.color} 0 25%, ${shade(p.color,-22)} 25% 40%)`;
+    if(style==='C' && (p.name==='Uranus'||p.name==='Neptune'))
+      d.style.background=`linear-gradient(180deg, ${p.color}, ${shade(p.color,-14)})`;
+    el.appendChild(d);
+  }
+}
+function shade(hex, amt){
+  const n=parseInt(hex.slice(1),16);
+  const f=(x)=>Math.max(0,Math.min(255,x+amt)).toString(16).padStart(2,'0');
+  return '#'+f(n>>16)+f((n>>8)&255)+f(n&255);
+}
+for (const [id, style] of [['sceneA','A'],['sceneB','B'],['sceneC','C']]){
+  const el=document.getElementById(id); stars(el,130); place(el,style, style!=='A');
+}
+</script>
+</body>
+</html>
