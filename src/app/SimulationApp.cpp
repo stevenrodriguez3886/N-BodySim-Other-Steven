@@ -30,8 +30,7 @@ constexpr sf::Color kBodyPalette[8]{
 constexpr sf::Color kBackground(10, 12, 24);
 constexpr sf::Color kHudColor(220, 220, 230);
 constexpr sf::Color kMenuDimColor(168, 172, 190);      // inactive header/item text
-constexpr sf::Color kMenuAccentColor(120, 190, 255);   // open tab underline
-constexpr sf::Color kMenuSelectColor(150, 230, 170);   // current item + tick
+constexpr sf::Color kMenuSelectColor(150, 230, 170);   // current-item dot
 constexpr sf::Color kMenuPanelColor(22, 25, 38, 242);
 constexpr sf::Color kMenuBorderColor(70, 78, 100);
 constexpr double kMenuStripBottom = 34.0;
@@ -393,16 +392,8 @@ void SimulationApp::render() {
                 static_cast<float>(rect.topLeft.x + 7.0),
                 static_cast<float>(rect.topLeft.y + 7.0)});
             window_.draw(label);
-
-            if (open) {  // tab indicator: accent underline, no filled box
-                sf::RectangleShape underline{sf::Vector2f{
-                    static_cast<float>(rect.size.x - 14.0), 2.0F}};
-                underline.setPosition(sf::Vector2f{
-                    static_cast<float>(rect.topLeft.x + 7.0),
-                    static_cast<float>(rect.topLeft.y) + 18.0F});
-                underline.setFillColor(kMenuAccentColor);
-                window_.draw(underline);
-            }
+            // No underline or box on the open tab: the dropdown itself already
+            // shows which group is open; "open" only brightens the label.
         }
 
         if (layout.openGroup) {
@@ -438,15 +429,17 @@ void SimulationApp::render() {
                     static_cast<float>(rect.topLeft.y + 3.0)});
                 window_.draw(label);
 
-                if (selected) {  // the one selection indicator: tick + tint
-                    sf::Text tick{*font_};
-                    tick.setCharacterSize(13U);
-                    tick.setFillColor(kMenuSelectColor);
-                    tick.setString("\xE2\x9C\x93");
-                    tick.setPosition(sf::Vector2f{
-                        static_cast<float>(rect.topLeft.x + 8.0),
-                        static_cast<float>(rect.topLeft.y + 3.0)});
-                    window_.draw(tick);
+                if (selected) {  // the one selection indicator: dot + tint.
+                    // A drawn circle, not a glyph: ✓ renders as tofu boxes
+                    // with some system fonts.
+                    sf::CircleShape dot(3.0F, 24U);
+                    dot.setFillColor(kMenuSelectColor);
+                    dot.setPosition(sf::Vector2f{
+                        static_cast<float>(rect.topLeft.x + 10.0),
+                        static_cast<float>(rect.topLeft.y + rect.size.y /
+                                                            2.0 -
+                                                    3.0)});
+                    window_.draw(dot);
                 }
             }
         }
