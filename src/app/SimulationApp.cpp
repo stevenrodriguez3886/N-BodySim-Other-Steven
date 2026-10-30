@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "nbody/app/StepPlanning.hpp"
+#include "nbody/app/Trace.hpp"
 
 namespace {
 
@@ -165,6 +166,22 @@ void SimulationApp::rebuildScene(bool refitCamera) {
 }
 
 void SimulationApp::restartScene() {
+    // D.7 R-stall probe: dump the full rebuild inputs (env-gated, see
+    // Trace.hpp; env-off cost is one predicted branch).
+    if (traceEnabled()) {
+        std::fprintf(stderr,
+                     "[%8.3f s] [trace] restart preset=%d seed=%lld "
+                     "dt=%.9f bodies=%u sep=%g hyper=%d planets=%d pluto=%d "
+                     "acc=%.6f paused=%d t=%.6f steps=%llu\n",
+                     traceNow(),
+                     static_cast<int>(menuState_.preset),
+                     static_cast<long long>(menuState_.seed), menuState_.dt,
+                     menuState_.bodies, menuState_.separation,
+                     menuState_.hyperbolic ? 1 : 0, menuState_.planetCount,
+                     menuState_.pluto ? 1 : 0, accumulator_,
+                     paused_ ? 1 : 0, world_.simulationTime(),
+                     static_cast<unsigned long long>(world_.totalSteps()));
+    }
     rebuildScene(true);
 }
 
@@ -614,6 +631,18 @@ void SimulationApp::update(sf::Time frameTime) {
     // a catch-up burst. Pause drains the accumulator but skips world_.step().
     const StepPlan plan =
         planSteps(accumulator_, frameTime.asSeconds(), world_.timeStep());
+    if (traceEnabled()) {
+        // Step-planning inputs (D.7): a frozen sim shows up here as
+        // steps=0 forever (dt/acc anomaly) or steps>0 with the world
+        // refusing to advance (core-side stall).
+        std::fprintf(stderr,
+                     "[%8.3f s] [trace] plan ft=%.6f dt=%.9f acc=%.6f -> "
+                     "steps=%d rem=%.6f paused=%d t=%.6f\n",
+                     traceNow(),
+                     frameTime.asSeconds(), world_.timeStep(), accumulator_,
+                     plan.steps, plan.remainder, paused_ ? 1 : 0,
+                     world_.simulationTime());
+    }
     if (!paused_) {
         for (int i = 0; i < plan.steps; ++i) {
             world_.step();
@@ -630,16 +659,29 @@ void SimulationApp::update(sf::Time frameTime) {
 void SimulationApp::updateStats() {
     const double secs = statsClock_.restart().asSeconds();
     const std::uint64_t steps = world_.totalSteps();
-    const double ups = secs > 0.0
-                           ? static_cast<double>(
-                                 stepsSince(steps, lastTotalSteps_)) / secs
-                           : 0.0;
+    const double ups =
+        secs > 0.0
+            ? static_cast<double>(stepsSince(steps, lastTotalSteps_)) / secs
+            : 0.0;
     const double fps = secs > 0.0 ? framesInWindow_ / secs : 0.0;
     lastTotalSteps_ = steps;
     framesInWindow_ = 0;
     statsSuffix_ = formatStats(fps, ups, world_.bodies().size(),
                                world_.simulationTime());
     window_.setTitle(liveTitle(menuState_) + statsSuffix_);
+    if (traceEnabled()) {
+        // Stats-window outcome (D.7): the measured interval (secs) and the
+        // UPS/fps the title now shows. stepsSince clamps the post-restart
+        // counter reset (a raw unsigned subtract wrapped to ~2^64 and the
+        // title rendered garbage UPS for one window after every R);
+        // paused/acc alongside t is what the controller's one-off R stall
+        // needed to distinguish pause/catch-up/clock theories.
+        std::fprintf(stderr,
+                     "[%8.3f s] [trace] stats secs=%.6f ups=%.1f fps=%.1f "
+                     "bodies=%zu t=%.6f acc=%.6f paused=%d\n",
+                     traceNow(), secs, ups, fps, world_.bodies().size(),
+                     world_.simulationTime(), accumulator_, paused_ ? 1 : 0);
+    }
 }
 
 // Spec D.3 planet-style body renderer (Task 2). SFML 3.0.2 has NO

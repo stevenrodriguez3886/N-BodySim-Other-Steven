@@ -12,7 +12,7 @@ unless a system SFML 3 is found; audio is never built — `SFML_BUILD_AUDIO=OFF`
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
-ctest --test-dir build        # 72 tests
+ctest --test-dir build        # 115 tests
 ```
 
 The executable is `build/nbody`.
@@ -23,7 +23,8 @@ The executable is `build/nbody`.
 | --- | --- | --- | --- |
 | `--preset=` | `two-body` \| `solar-system` \| `random-cloud` \| `figure-eight` | `two-body` | Which scenario to load |
 | `--integrator=` | `euler` \| `rk4` | `rk4` | Integration scheme |
-| `--seed=` | integer | `42` | RNG seed (affects `random-cloud`) |
+| `--seed=` | int64, leading `-` allowed | `42` | RNG seed (affects `random-cloud`) |
+| `--bodies=` | integer, clamped to [2, 2000] | `150` | random-cloud body count |
 | `--dt=` | float in (0, 10] | preset's `1/120` | Override the fixed physics timestep |
 | `--headless=` | integer | `0` (windowed) | Run N steps, print one stats line, exit |
 | `--smoke` | — | off | Open a window for one frame, exit 0 |
@@ -47,11 +48,11 @@ identical output and md5).
 | --- | --- |
 | `Esc` | Close an open dropdown; otherwise close the window |
 | `Space` | Pause / resume (rendering continues; a hung-upon frame never turns into a catch-up burst — the loop is clamped to 0.25 s of frame time and 30 steps per frame) |
-| `R` | Restart from the current Preset and Random seed menu options, not the launch options |
-| Preset | Click the header to choose one of four presets |
+| `R` | Restart from the current menu options (preset, options, time step, seed), not the launch options |
+| Simulation | Click the header to choose a preset, edit its options, or restart the scene |
 | Integrator | Click the header to choose RK4 or Euler |
-| Physics | Click the header to choose a time step or restart the scene |
-| Random seed | Click the header, then the "type a seed" row, and type the seed directly (see the menu section) |
+| Physics | Click the header to choose a time step |
+| Cloud | Only visible for random-cloud: seed and body-count fields, plus their random buttons (see the menu section) |
 | Left-drag | Pan the camera |
 | Mouse wheel | Zoom anchored at the cursor position |
 
@@ -61,41 +62,65 @@ loadable system font is still used for the menu labels and the staged chip).
 
 ## In-window menu
 
-The layout-A menu is a top bar with Preset, Integrator, Physics, and Random
-seed groups. Click a group header to open its dropdown, then click an option;
-click outside the dropdown to close it. The fixed-width headers can clip past
-the right edge in narrow windows.
+The layout-A menu is a top bar with Simulation, Integrator, and Physics
+groups, plus a Cloud group that is visible **only while random-cloud is
+active** (hidden groups are invisible to layout and hit-testing alike). Click
+a group header to open its dropdown, then click an option; click outside the
+dropdown to close it. The fixed-width headers can clip past the right edge in
+narrow windows. Hovering a header or row for 0.5 s shows its tooltip; any
+click, scroll, or menu-close hides it.
+
+Dropdown row counts, by active preset:
+
+| Preset | Simulation | Integrator | Physics | Cloud |
+| --- | --- | --- | --- | --- |
+| two-body | 9: 4 presets, separator, `separation`, `path`, separator, restart | 2 | 5 | — |
+| solar-system | 9: 4 presets, separator, `planets`, `pluto`, separator, restart | 2 | 5 | — |
+| random-cloud | 7: 4 presets, separator, separator, restart (its options live in Cloud) | 2 | 5 | 4: `type a seed`, `random seed`, `bodies`, `random bodies` |
+| figure-eight | 8: 4 presets, separator, `separation`, separator, restart | 2 | 5 | — |
+
+The restart row sits at the bottom of Simulation and is the same action as
+`R`.
 
 Changes apply immediately while the simulation is running. While paused,
 changes are staged and shown in a pending chip. Resuming applies the pending
-choices together in preset, integrator, time-step, then seed order; the last
-choice made in each group wins.
+choices together in preset, integrator, time-step, seed, then option order;
+the last choice made in each group wins.
 
 | Group | While running | While paused |
 | --- | --- | --- |
-| Preset | Switches scenes, resets simulation time, and refits the camera | Staged until resume |
-| Integrator | Switches integrator without changing the current simulation state | Staged until resume |
+| Simulation preset rows | Switch scenes, reset simulation time, and refit the camera | Staged until resume |
+| Simulation option rows | Field rows (separation, planets) commit in place; path and pluto toggle live | Staged until resume |
+| Integrator | Switch integrator without changing the current simulation state | Staged until resume |
 | Physics time step | Applies from the next simulation step | Staged until resume |
-| Random seed | Regenerates random-cloud immediately, preserving the camera; for other presets, takes effect on the next random-cloud load | Staged until resume |
+| Cloud seed / bodies | Regenerate random-cloud immediately, preserving the camera | Staged until resume |
 
-Physics offers time steps of `1/30`, `1/60`, `1/120`, `1/240`, and `1/480`,
-plus a **Restart scene** action that uses the currently selected preset and
-seed. The `R` key uses those same current menu options. Both restarts act
-immediately, even while paused, and use the already-applied options — staged
-choices stay pending until resume. If `--dt` sets a value
-outside the menu list, the Physics header shows that raw value and no dropdown
-choice is ticked. Menu navigation is mouse-only; keyboard menu navigation is not
+Physics offers time steps of `1/30`, `1/60`, `1/120`, `1/240`, and `1/480`.
+**Restart scene** is the bottom row of the Simulation dropdown and uses the
+currently selected preset and options; the `R` key uses those same current
+menu options. Both restarts act immediately, even while paused, and use the
+already-applied options — staged choices stay pending until resume. If
+`--dt` sets a value outside the menu list, the Physics header shows that raw
+value and no dropdown choice is ticked. Menu navigation is mouse-only; keyboard menu navigation is not
 supported.
 
-The Random seed dropdown is a single typed field, not a ± stepper: click its
-row to focus an inline editor pre-filled with the current live seed (a staged
-seed, if one is pending, is replaced when you commit). Type digits — at most
-10, values saturate at 4294967295 (`UINT32_MAX`) — and press Enter to commit
-(live when running, staged when paused, like every other group). Escape
-cancels the edit only; the dropdown stays open. Clicking anywhere else cancels
-the edit and then handles that click normally (dropdown hit, or close and
-drag). Mouse-wheel zoom while the editor is open deliberately does **not**
-cancel the edit — zoom and typing do not interfere.
+Every menu field (seed, bodies, separation, planets) is a single typed field,
+not a ± stepper: click its row to focus an inline editor pre-filled with the
+current live value (a staged value, if one is pending, is replaced when you
+commit). The seed field takes a full signed 64-bit value — at most 19
+characters, a leading `-` allowed — and out-of-range input saturates at the
+int64 bounds. While a field is focused, `Ctrl+C`/`Ctrl+X`/`Ctrl+V` copy,
+cut, and paste through the system clipboard (paste is sanitized to the
+field's grammar with the same overflow rule as typing); any other Ctrl combo
+is swallowed. Other fields take plain digits (bodies saturate at 4 digits,
+values clamped to [2, 2000] like `--bodies`). Press Enter to commit (live
+when running, staged when paused, like every other group). Escape cancels
+the edit only; the dropdown stays open. Clicking anywhere else cancels the
+edit and then handles that click normally (dropdown hit, or close and drag).
+Mouse-wheel zoom while an editor is open deliberately does **not** cancel
+the edit — zoom and typing do not interfere. The Cloud group additionally
+offers `random seed` and `random bodies` buttons that roll fresh values
+through the same setters.
 
 ## Physics notes
 
@@ -122,8 +147,12 @@ real mass and size ordering. Gas giants get latitude bands (Jupiter 3,
 Saturn 2) and Saturn gets a ring. Fully deterministic and RNG-free: the
 preset is a literal list and ignores the seed.
 
-**Starfield.** The background is 600 fixed-seed stars locked to the world:
-pan and zoom move them, and they never regenerate.
+**Starfield.** The background is an infinite tiled procedural starfield: a
+splitmix64 hash of each world cell decides star presence, position, size,
+and color on one global grid, so panning slides the same stars and zoom stays
+populated at any scale. Density is a single constant,
+`kStarDensityNum/kStarDensityDenom` (1/4 of cells) in
+`src/app/Starfield.cpp` — a one-line tunable.
 
 **Euler vs RK4 demo.** Run the same scene under both integrators:
 
