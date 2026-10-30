@@ -163,27 +163,100 @@ TEST_CASE("preset_cloud_determinism") {
 }
 
 TEST_CASE("preset_solar_planets_bounded") {
-    // 10000 steps at the preset's default dt: every planet must stay within
-    // 2x its initial sun-distance (bound orbits, no ejections).
+    // Spec D.2: 2000 steps at the preset's default dt; every planet must stay
+    // within 1.35x its initial sun-distance (bound orbits, no ejections) and
+    // nothing may collide (compressed spacings are still >> collision radii).
     SimulationSetup setup = createPreset(PresetName::SolarSystem, 42);
-    REQUIRE(setup.bodies.size() == 5);
+    REQUIRE(setup.bodies.size() == 9);
     const std::vector<Body> start = setup.bodies;
 
     PhysicsWorld world{setup.config, makeIntegrator(IntegratorKind::Rk4)};
     world.reset(std::move(setup.bodies));
-    for (int i = 0; i < 10000; ++i) {
+    for (int i = 0; i < 2000; ++i) {
         world.step();
     }
 
+    CHECK(world.mergeCount() == 0);
     const auto& bodies = world.bodies();
-    REQUIRE(bodies.size() == 5);
+    REQUIRE(bodies.size() == 9);  // no merges => document order preserved
     for (std::size_t i = 1; i < bodies.size(); ++i) {
         const double r0 =
             length(start[i].position - start[0].position);
         const double r1 = length(bodies[i].position - bodies[0].position);
         CHECK(std::isfinite(r1));
-        CHECK(r1 < 2.0 * r0);
+        CHECK(r1 < 1.35 * r0);
     }
+}
+
+TEST_CASE("preset_solar_eight_bodies_circular") {
+    // Spec D.2 literals: sun + 8 planets (Mercury..Neptune), circular
+    // velocities v = sqrt(g*M_sun/a), start angles from the fixed list.
+    const SimulationSetup setup = createPreset(PresetName::SolarSystem, 42);
+    REQUIRE(setup.bodies.size() == 9);
+
+    const Body& sun = setup.bodies[0];
+    CHECK(sun.mass == Approx(500.0).margin(1e-12));
+    CHECK(sun.appearance.glow);
+    CHECK(sun.appearance.color == 0xFFD75Eu);
+
+    const double kRadii[8] = {6.0, 9.3, 12.3, 15.6, 23.4, 30.0, 38.4, 46.2};
+    const double kAnglesDeg[8] = {0.0, 40.0, 80.0, 130.0,
+                                  170.0, 215.0, 260.0, 305.0};
+    const std::uint32_t kColors[8] = {
+        0x9C8E82u, 0xE6C47Au, 0x5F8DD6u, 0xC96A4Au,
+        0xD8A568u, 0xE3CE9Au, 0x9AD6D2u, 0x5A7BD6u};
+    constexpr double kDegToRad = 0.017453292519943295;  // pi/180
+
+    for (int i = 0; i < 8; ++i) {
+        CAPTURE(i);
+        const Body& p = setup.bodies[static_cast<std::size_t>(i) + 1];
+        CHECK(p.id == static_cast<std::uint64_t>(i) + 2);
+        CHECK(p.mass > 0.0);
+        CHECK(p.mass <= 1e-2 * sun.mass);  // planets never destabilise orbits
+
+        const double a = kRadii[i];
+        const Vec2 rel = p.position - sun.position;
+        // Start position on the literal orbital radius, at the literal angle.
+        CHECK(length(rel) == Approx(a).epsilon(1e-12).margin(1e-9));
+        const double ang = std::atan2(rel.y, rel.x);
+        const double expected = kAnglesDeg[i] * kDegToRad;
+        const double diff =
+            std::atan2(std::sin(ang - expected), std::cos(ang - expected));
+        CHECK(std::fabs(diff) < 1e-9);
+
+        // Circular speed v = sqrt(g*M_sun/a), tangential, counter-clockwise.
+        const Vec2 vel = p.velocity - sun.velocity;
+        const double vCirc = std::sqrt(setup.config.g * sun.mass / a);
+        CHECK(length(vel) == Approx(vCirc).epsilon(1e-12));
+        CHECK(std::fabs(dot(rel, vel)) < 1e-9 * a * vCirc);  // perpendicular
+        CHECK(rel.x * vel.y - rel.y * vel.x > 0.0);          // CCW
+
+        // Per-planet appearance per spec (renderer contract, Tasks 2-3).
+        CHECK(p.appearance.color == kColors[i]);
+        CHECK(p.appearance.glow == false);
+        CHECK(p.appearance.ring == (i == 5));    // Saturn only
+        CHECK(p.appearance.bands == (i == 4 ? 3 : (i == 5 ? 2 : 0)));
+    }
+}
+
+TEST_CASE("preset_solar_no_rng") {
+    // The solar preset must stay seed-free: two different seeds produce the
+    // exact same setup, body-for-body, including appearance.
+    const SimulationSetup a = createPreset(PresetName::SolarSystem, 7);
+    const SimulationSetup b = createPreset(PresetName::SolarSystem, 999);
+    REQUIRE(!a.bodies.empty());
+    CHECK(bodiesBitwiseEqual(a.bodies, b.bodies));
+    REQUIRE(a.bodies.size() == b.bodies.size());
+    for (std::size_t i = 0; i < a.bodies.size(); ++i) {
+        CAPTURE(i);
+        CHECK(a.bodies[i].appearance.color == b.bodies[i].appearance.color);
+        CHECK(a.bodies[i].appearance.glow == b.bodies[i].appearance.glow);
+        CHECK(a.bodies[i].appearance.ring == b.bodies[i].appearance.ring);
+        CHECK(a.bodies[i].appearance.bands == b.bodies[i].appearance.bands);
+    }
+    CHECK(bitsEqual(a.config.g, b.config.g));
+    CHECK(bitsEqual(a.config.softening, b.config.softening));
+    CHECK(bitsEqual(a.config.timeStep, b.config.timeStep));
 }
 
 TEST_CASE("preset_presets_valid") {

@@ -77,6 +77,37 @@ TEST_CASE("world_merge_position_radius") {
     CHECK(survivor.radius == Approx(std::sqrt(0.5 * 0.5 + 0.3 * 0.3)).margin(1e-9));
 }
 
+TEST_CASE("world_merge_keeps_survivor_appearance") {
+    // Appearance is physics-inert: the merge must neither read nor rewrite it.
+    // The survivor (larger mass) carries its own appearance; the loser's is
+    // dropped. The small body is listed FIRST so the survivor reaches its
+    // final slot through the swap-and-pop path, proving the whole Body object
+    // (appearance included) travels intact, not just the in-place fields.
+    PhysicsWorld world{inertConfig(), std::make_unique<EulerIntegrator>()};
+    std::vector<Body> bodies;
+    bodies.push_back(Body{1, 1.0, 0.3, Vec2{0.0, 0.0}, Vec2{0.0, 1.0}});
+    bodies[0].appearance = Body::Appearance{0x0F0F0Fu, false, true, 1};
+    bodies.push_back(Body{2, 5.0, 0.5, Vec2{0.0, 0.0}, Vec2{1.0, 0.0}});
+    bodies[1].appearance = Body::Appearance{0xABC123u, true, false, 3};
+    world.reset(std::move(bodies));
+
+    world.step();  // coincident: inert field cannot separate them before merge
+
+    REQUIRE(world.bodies().size() == 1);
+    CHECK(world.mergeCount() == 1);
+    const Body& survivor = world.bodies()[0];
+    CHECK(survivor.id == 2);  // larger mass survives
+    CHECK(survivor.mass == Approx(6.0).margin(1e-12));
+    // Survivor's appearance survived the merge untouched ...
+    CHECK(survivor.appearance.color == 0xABC123u);
+    CHECK(survivor.appearance.glow == true);
+    CHECK(survivor.appearance.ring == false);
+    CHECK(survivor.appearance.bands == 3);
+    // ... and nothing of the loser's leaked into it.
+    CHECK(survivor.appearance.color != 0x0F0F0Fu);
+    CHECK(survivor.appearance.bands != 1);
+}
+
 TEST_CASE("world_chain_merge_terminates") {
     // Three coincident bodies: the scan-restart loop must terminate with one
     // survivor (id 2, the largest mass) and exactly 2 recorded merges.

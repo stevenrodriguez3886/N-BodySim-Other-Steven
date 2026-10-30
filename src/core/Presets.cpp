@@ -1,6 +1,7 @@
 #include "nbody/core/Presets.hpp"
 
 #include <cmath>
+#include <iterator>
 #include <random>
 #include <utility>
 
@@ -30,25 +31,63 @@ SimulationSetup twoBody() {
         cfg};
 }
 
-// Sun m=500 at rest at origin; four planets m=0.001 on circular orbits at
-// r = 5, 10, 20, 40 with tangential v = (0, sqrt(G*500/r)). k=0.05; the sun's
-// stored radius is NOT visually capped (the draw-time cap is Task 9's job).
+// OUR solar system (spec D.2): sun m=500 at rest at origin + 8 planets
+// (Mercury..Neptune) on circular orbits, tangential v = sqrt(G*M_sun/a),
+// start angles from a fixed literal list — NO RNG, the preset ignores the
+// seed. Radii a = 6*(1, 1.55, 2.05, 2.6, 3.9, 5.0, 6.4, 7.7): a sqrt-style
+// compression of real AU, order preserved. Masses 1e-4..8e-3 (Jupiter
+// heaviest, every planet <= 1e-2 * sun so orbits stay clean). Collision
+// radii stay k=0.05 (tiny): no merges at these spacings. The sun's stored
+// radius is NOT visually capped (draw-time floors are Task 2's job).
+// Rocky-planet masses are floored into the spec band (real ratios would put
+// them ~3 orders of magnitude below it); ordering follows reality.
 SimulationSetup solarSystem() {
     WorldConfig cfg;
     cfg.g = 1.0;
     cfg.softening = 0.01;
 
     constexpr double kSunMass = 500.0;
-    constexpr double kPlanetMass = 0.001;
+    constexpr double kDegToRad = 0.017453292519943295;  // pi/180
+
+    struct PlanetDef {
+        double mass;
+        double a;        // orbital radius (start position radius), world units
+        double angleDeg;  // fixed start angle, counter-clockwise orbit
+        std::uint32_t color;
+        std::uint8_t bands;
+        bool ring;
+    };
+    constexpr PlanetDef kPlanets[] = {
+        {1.0e-4, 6.0, 0.0, 0x9C8E82u, 0, false},     // Mercury
+        {1.6e-4, 9.3, 40.0, 0xE6C47Au, 0, false},    // Venus
+        {2.0e-4, 12.3, 80.0, 0x5F8DD6u, 0, false},   // Earth
+        {1.2e-4, 15.6, 130.0, 0xC96A4Au, 0, false},  // Mars
+        {8.0e-3, 23.4, 170.0, 0xD8A568u, 3, false},  // Jupiter
+        {2.4e-3, 30.0, 215.0, 0xE3CE9Au, 2, true},   // Saturn
+        {3.7e-4, 38.4, 260.0, 0x9AD6D2u, 0, false},  // Uranus
+        {4.3e-4, 46.2, 305.0, 0x5A7BD6u, 0, false},  // Neptune
+    };
+
     std::vector<Body> bodies;
-    bodies.emplace_back(Body{1, kSunMass, radiusFor(kSunMass, 0.05),
-                             Vec2{0.0, 0.0}, Vec2{0.0, 0.0}});
+    bodies.reserve(1 + std::size(kPlanets));
+
+    Body sun{1, kSunMass, radiusFor(kSunMass, 0.05), Vec2{0.0, 0.0},
+            Vec2{0.0, 0.0}};
+    sun.appearance.color = 0xFFD75Eu;
+    sun.appearance.glow = true;  // star-style glow (renderer, Task 2)
+    bodies.push_back(sun);
+
     std::uint64_t id = 2;
-    for (double r : {5.0, 10.0, 20.0, 40.0}) {
-        const double v = std::sqrt(cfg.g * kSunMass / r);
-        bodies.emplace_back(Body{id++, kPlanetMass,
-                                 radiusFor(kPlanetMass, 0.05), Vec2{r, 0.0},
-                                 Vec2{0.0, v}});
+    for (const PlanetDef& p : kPlanets) {
+        const double theta = p.angleDeg * kDegToRad;
+        const double v = std::sqrt(cfg.g * kSunMass / p.a);
+        Body body{id++, p.mass, radiusFor(p.mass, 0.05),
+                  Vec2{p.a * std::cos(theta), p.a * std::sin(theta)},
+                  Vec2{-v * std::sin(theta), v * std::cos(theta)}};
+        body.appearance.color = p.color;
+        body.appearance.bands = p.bands;
+        body.appearance.ring = p.ring;
+        bodies.push_back(body);
     }
     return SimulationSetup{std::move(bodies), cfg};
 }

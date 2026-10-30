@@ -131,6 +131,11 @@ void PhysicsWorld::resolveCollisions() {
                 survivor.radius = std::sqrt(survivor.radius * survivor.radius +
                                             loser.radius * loser.radius);
                 survivor.mass = m;
+                // Body::appearance is deliberately untouched here: physics
+                // never reads it, and the survivor BODY object carries its
+                // appearance through both the in-place update above and the
+                // swap below (the loser's is erased with it). No field-by-
+                // field copy exists, so there is nothing to keep in sync.
                 // Swap-and-pop: the survivor lands at the loser's slot; the
                 // scan restart clears any staleness by construction.
                 if (l != bodies_.size() - 1) {
