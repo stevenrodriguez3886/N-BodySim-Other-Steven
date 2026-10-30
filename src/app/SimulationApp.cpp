@@ -329,32 +329,183 @@ void SimulationApp::updateStats() {
     window_.setTitle(liveTitle(menuState_) + statsSuffix_);
 }
 
+// Spec D.3 planet-style body renderer (Task 2). SFML 3.0.2 has NO
+// EllipseShape and NO stencil/group APIs, so every effect below is built
+// from plain CircleShapes, RectangleShapes and Triangle VertexArrays.
+// Draw order per body: glow halos -> ring back -> body circle -> shading ->
+// bands -> ring front.
+void drawBody(sf::RenderWindow& window, const core::Body& body,
+              const Camera& camera, double w, double h) {
+    constexpr double kPi = 3.14159265358979323846;
+    const sf::Vector2f center = toSf(camera.toPixels(body.position, w, h));
+
+    sf::Color bodyColor = kBodyPalette[body.id % 8U];
+    if (body.appearance.color != 0U) {  // explicit 0xRRGGBB wins over palette
+        const std::uint32_t c = body.appearance.color;
+        bodyColor = sf::Color(static_cast<std::uint8_t>((c >> 16) & 0xFFU),
+                              static_cast<std::uint8_t>((c >> 8) & 0xFFU),
+                              static_cast<std::uint8_t>(c & 0xFFU));
+    }
+
+    // Minimum visible size (D.3): 3 px floor, doubled for glowing bodies
+    // (suns). Cosmetic only — physical collision radii are untouched.
+    const double px = std::max(body.radius * camera.scale,
+                               body.appearance.glow ? 6.0 : 3.0);
+
+    auto disc = [&](double radius, sf::Color fill, sf::Vector2f at) {
+        sf::CircleShape shape{static_cast<float>(radius)};
+        shape.setOrigin(sf::Vector2f{static_cast<float>(radius),
+                                     static_cast<float>(radius)});
+        shape.setFillColor(fill);
+        shape.setPosition(at);
+        window.draw(shape);
+    };
+
+    if (body.appearance.glow) {  // sun: three soft concentric halos
+        const double haloRadius[3] = {px * 2.5, px * 1.8, px * 1.3};
+        const std::uint8_t haloAlpha[3] = {24, 48, 96};
+        for (int i = 0; i < 3; ++i) {
+            sf::Color halo = bodyColor;
+            halo.a = haloAlpha[i];
+            disc(haloRadius[i], halo, center);
+        }
+    }
+
+    // Saturn-style ring: VertexArray triangle annulus, inner 1.45x / outer
+    // 2.3x body radius, y-squashed 0.38 and rotated -18 degrees. The full
+    // annulus draws behind the planet; the near half (segments whose rotated
+    // y > 0, i.e. below the ring centre line on screen) is redrawn after the
+    // planet so the ring appears to pass in front.
+    auto drawRing = [&](bool front) {
+        constexpr int kSegments = 64;
+        const double rot = -18.0 * kPi / 180.0;
+        const double cr = std::cos(rot);
+        const double sr = std::sin(rot);
+        const sf::Color ringColor(210, 190, 150,
+                                  front ? std::uint8_t{200}
+                                        : std::uint8_t{140});
+        auto pointAt = [&](double radius, double angle) {
+            const double lx = radius * std::cos(angle);
+            const double ly = radius * std::sin(angle) * 0.38;  // squash
+            return sf::Vector2f{
+                center.x + static_cast<float>(lx * cr - ly * sr),
+                center.y + static_cast<float>(lx * sr + ly * cr)};
+        };
+        sf::VertexArray ring{sf::PrimitiveType::Triangles};
+        for (int i = 0; i < kSegments; ++i) {
+            const double a0 = 2.0 * kPi * static_cast<double>(i) /
+                              static_cast<double>(kSegments);
+            const double a1 = 2.0 * kPi * static_cast<double>(i + 1) /
+                              static_cast<double>(kSegments);
+            const double am = 0.5 * (a0 + a1);
+            const double midY =
+                px * std::cos(am) * sr + px * std::sin(am) * 0.38 * cr;
+            if (front && midY <= 0.0) {
+                continue;  // far half: already covered by the full annulus
+            }
+            const sf::Vector2f i0 = pointAt(px * 1.45, a0);
+            const sf::Vector2f i1 = pointAt(px * 1.45, a1);
+            const sf::Vector2f o0 = pointAt(px * 2.3, a0);
+            const sf::Vector2f o1 = pointAt(px * 2.3, a1);
+            ring.append(sf::Vertex{i0, ringColor});
+            ring.append(sf::Vertex{o0, ringColor});
+            ring.append(sf::Vertex{o1, ringColor});
+            ring.append(sf::Vertex{i0, ringColor});
+            ring.append(sf::Vertex{o1, ringColor});
+            ring.append(sf::Vertex{i1, ringColor});
+        }
+        if (ring.getVertexCount() > 0) {
+            window.draw(ring);
+        }
+    };
+
+    if (body.appearance.ring) {
+        drawRing(false);
+    }
+
+    disc(px, bodyColor, center);  // the body itself
+
+    // Shading variant chosen: the offset-circle FALLBACK from spec D.3, not
+    // the 180-degree sector. SFML 3.0.2 has no stencil, and the two-disc
+    // half-overlay composite flickers; a single (0,0,0,50) disc offset
+    // 0.25*px away from the world origin (the sun) reads correctly as the
+    // night side in this top-down sun-centred scene, is stencil-free and
+    // costs one draw call.
+    if (px > 4.0) {
+        const sf::Vector2f sun =
+            toSf(camera.toPixels(core::Vec2{0.0, 0.0}, w, h));
+        sf::Vector2f away = center - sun;  // screen direction from the sun
+        const double len = std::hypot(away.x, away.y);
+        if (len > 1.0) {  // body at the sun's own screen spot: no shade
+            away *= static_cast<float>(0.25 * px / len);
+            disc(px, sf::Color(0, 0, 0, 50), center + away);
+        }
+    }
+
+    // Gas-giant bands (D.3): chord RectangleShapes fully inside the disc, no
+    // stencil needed. Latitudes t = 2k/(bands+1)-1, half-chord
+    // 0.88*r*sqrt(1-t^2), height r*0.35/(bands/2), colour = 0.72x body RGB.
+    if (body.appearance.bands > 0 && px >= 8.0) {
+        const int bands = body.appearance.bands;
+        const float bandHeight = static_cast<float>(px * 0.35 / (bands / 2.0));
+        const sf::Color bandColor(
+            static_cast<std::uint8_t>(bodyColor.r * 0.72F),
+            static_cast<std::uint8_t>(bodyColor.g * 0.72F),
+            static_cast<std::uint8_t>(bodyColor.b * 0.72F), 255);
+        for (int k = 1; k <= bands; ++k) {
+            const double t =
+                2.0 * static_cast<double>(k) /
+                    static_cast<double>(bands + 1) -
+                1.0;
+            const double halfW =
+                px * std::sqrt(std::max(0.0, 1.0 - t * t)) * 0.88;
+            sf::RectangleShape band{
+                sf::Vector2f{static_cast<float>(2.0 * halfW), bandHeight}};
+            band.setPosition(sf::Vector2f{
+                center.x - static_cast<float>(halfW),
+                center.y + static_cast<float>(px * t) - bandHeight * 0.5F});
+            band.setFillColor(bandColor);
+            window.draw(band);
+        }
+    }
+
+    if (body.appearance.ring) {
+        drawRing(true);  // near half over the planet
+    }
+}
+
 void SimulationApp::render() {
     const sf::Vector2u size = window_.getSize();  // live, handles resize
     const double w = static_cast<double>(size.x);
     const double h = static_cast<double>(size.y);
 
     window_.clear(kBackground);
-    for (const core::Body& b : world_.bodies()) {
-        sf::CircleShape body;
-        const double radiusPx = b.radius * camera_.scale;
-        body.setRadius(static_cast<float>(radiusPx));
-        body.setOrigin(sf::Vector2f{static_cast<float>(radiusPx),
-                                    static_cast<float>(radiusPx)});  // center
-        body.setFillColor(kBodyPalette[b.id % 8U]);
-        body.setPosition(toSf(camera_.toPixels(b.position, w, h)));
-        window_.draw(body);
+
+    // World-locked starfield first (spec D.3): fixed positions in world
+    // space, so pan/zoom move the stars and they never regenerate. Small
+    // outline-less quads, viewport-culled with a 2 px margin.
+    for (const Star& star : stars_) {
+        const core::Vec2 p = camera_.toPixels(star.position, w, h);
+        if (p.x < -2.0 || p.x > w + 2.0 || p.y < -2.0 || p.y > h + 2.0) {
+            continue;
+        }
+        sf::RectangleShape dot{
+            sf::Vector2f{static_cast<float>(star.sizePx),
+                        static_cast<float>(star.sizePx)}};
+        dot.setPosition(toSf(p));
+        dot.setFillColor(sf::Color(
+            star.r, star.g, star.b,
+            static_cast<std::uint8_t>(star.dim ? 120 : 255)));
+        window_.draw(dot);
     }
 
-    if (font_.has_value()) {  // HUD on screen too (belt over the title bar).
-        // Drawn before the menu so an open dropdown overlays it cleanly.
-        sf::Text hud{*font_};  // SFML 3: ctor takes the Font, no default ctor
-        hud.setCharacterSize(14U);
-        hud.setFillColor(kHudColor);
-        hud.setString(liveTitle(menuState_) + statsSuffix_);
-        hud.setPosition(sf::Vector2f{8.0F, 40.0F});
-        window_.draw(hud);
+    for (const core::Body& b : world_.bodies()) {
+        drawBody(window_, b, camera_, w, h);
     }
+
+    // On-screen HUD duplicate deliberately removed (spec D.3): stats live
+    // in the title bar only (updateStats). The staged-chip below stays --
+    // it is menu UI, not a HUD.
 
     const MenuLayout layout = menuLayout(w, h, menuState_.openGroup);
     sf::RectangleShape menuBackground{sf::Vector2f{static_cast<float>(w), 28.0F}};

@@ -11,6 +11,7 @@
 #include "nbody/app/Camera.hpp"
 #include "nbody/app/MenuBar.hpp"
 #include "nbody/app/MenuModel.hpp"
+#include "nbody/app/Starfield.hpp"
 #include "nbody/core/Body.hpp"
 #include "nbody/core/PhysicsWorld.hpp"
 #include "nbody/core/Presets.hpp"
@@ -18,8 +19,10 @@
 namespace nbody::app {
 
 // Interactive SFML 3 application (plan D): fixed-timestep physics loop,
-// camera pan/zoom, HUD in the title bar and (when a font is loadable) drawn
-// on screen. All SFML event handling uses the SFML 3 std::optional<pollEvent
+// camera pan/zoom and stats in the title bar only (the on-screen HUD
+// duplicate was dropped in the visual overhaul, spec D.3; a loadable font
+// is still used for menu labels and the staged chip). All SFML event
+// handling uses the SFML 3 std::optional<pollEvent
 // + getIf<T>() style; waitEvent/event.type are defects per plan.
 //
 // The accumulator math itself is the pure planSteps() in StepPlanning.hpp so
@@ -49,6 +52,7 @@ private:
     core::PhysicsWorld world_;
     MenuState menuState_;
     Camera camera_;
+    std::vector<Star> stars_{starfield()};  // world-locked, generated once
     sf::RenderWindow window_;
     sf::Clock frameClock_;
     std::optional<sf::Font> font_;  // nullopt -> HUD text skipped, title only

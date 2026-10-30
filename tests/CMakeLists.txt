@@ -28,6 +28,7 @@ add_test(NAME nbody_smoke COMMAND nbody --smoke)
 # nbody_app but never instantiates an SFML window (pure code; this exe must
 # run display-free).
 add_executable(nbody_app_tests app/test_args.cpp app/test_camera.cpp
-  app/test_step_planning.cpp app/test_menu_bar.cpp app/test_menu_model.cpp)
+  app/test_step_planning.cpp app/test_menu_bar.cpp app/test_menu_model.cpp
+  app/test_starfield.cpp)
 target_link_libraries(nbody_app_tests PRIVATE nbody_app Catch2::Catch2WithMain)
 catch_discover_tests(nbody_app_tests)
