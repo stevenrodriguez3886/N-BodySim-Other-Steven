@@ -594,10 +594,16 @@ void SimulationApp::render() {
 
     window_.clear(kBackground);
 
-    // World-locked starfield first (spec D.3): fixed positions in world
-    // space, so pan/zoom move the stars and they never regenerate. Small
-    // outline-less quads, viewport-culled with a 2 px margin.
-    for (const Star& star : stars_) {
+    // Infinite tiled starfield first (spec D.5): the viewport's world rect
+    // (viewportStarRect: camera_.toWorld of the corners + 2 px pad, the
+    // corner mapping itself unit-tested in test_starfield.cpp) is re-queried
+    // every frame, so panning slides a subset of one global grid and zoom
+    // stays populated at any scale. Quads stay viewport-culled with the
+    // same 2 px pixel margin the old fixed field used.
+    const Rect view = viewportStarRect(camera_, w, h);
+    const std::vector<Star> stars =
+        starsInRect(view.x0, view.y0, view.x1, view.y1);
+    for (const Star& star : stars) {
         const core::Vec2 p = camera_.toPixels(star.position, w, h);
         if (p.x < -2.0 || p.x > w + 2.0 || p.y < -2.0 || p.y > h + 2.0) {
             continue;

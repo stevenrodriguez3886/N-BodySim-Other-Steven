@@ -54,7 +54,6 @@ private:
     core::PhysicsWorld world_;
     MenuState menuState_;
     Camera camera_;
-    std::vector<Star> stars_{starfield()};  // world-locked, generated once
     sf::RenderWindow window_;
     sf::Clock frameClock_;
     std::optional<sf::Font> font_;  // nullopt -> in-window text skipped, title only
