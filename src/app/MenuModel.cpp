@@ -223,6 +223,7 @@ MenuEffect menuApply(MenuState& state, const MenuAction& action,
             // app-side, then flow through menuSetSeed/menuSetBodies.
             return MenuEffect::None;
 
+        case MenuGroup::Options:  // wired up in the MenuModel task
         case MenuGroup::Count_:
             return MenuEffect::None;
     }
@@ -344,6 +345,7 @@ std::string menuItemLabel(const MenuState& state, MenuGroup group,
                 default:
                     return "random bodies";
             }
+        case MenuGroup::Options:  // wired up in the MenuModel task
         case MenuGroup::Count_:
             return {};
     }
@@ -400,6 +402,7 @@ std::string menuItemTooltip(MenuGroup group, int index,
                 default:
                     return "Use a random body count (2-2000)";
             }
+        case MenuGroup::Options:  // wired up in the tooltips task
         case MenuGroup::Count_:
             return {};
     }
@@ -489,6 +492,7 @@ int menuTickedIndex(const MenuState& state, MenuGroup group) {
             // Field/roll rows: no tick. Toggle state shows in the label
             // ("path: ...", "pluto: ..."), never as a tick row.
             return -1;
+        case MenuGroup::Options:  // wired up in the MenuModel task
         case MenuGroup::Count_:
             return -1;
     }

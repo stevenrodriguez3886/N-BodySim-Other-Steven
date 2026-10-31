@@ -10,11 +10,13 @@
 
 namespace nbody::app {
 
-// Menu groups, spec D.1 (renamed from Preset/Seed): Simulation carries the
-// preset list, the active preset's option rows and the restart row; Cloud
-// (visible only while preset == random-cloud) carries the seed and bodies
-// fields plus their roll buttons.
-enum class MenuGroup : std::uint8_t { Simulation, Integrator, Physics, Cloud, Count_ };
+// Menu groups (menu-bar rework spec): Simulation carries ONLY the preset
+// list, one separator and the restart row; Cloud (visible only while
+// preset == random-cloud) carries the seed and bodies fields plus their
+// roll buttons; Options (the complement of Cloud, sharing the same last
+// bar slot) carries the active preset's option rows.
+enum class MenuGroup : std::uint8_t { Simulation, Integrator, Physics, Cloud,
+                                    Options, Count_ };
 
 // Positions and sizes are expressed in window pixels.
 struct MenuRect {
@@ -43,9 +45,10 @@ struct MenuLayout {
     std::vector<MenuRect> disabledRows;
 };
 
-// Row counts depend on the selected preset (dynamic option rows) and on
-// group visibility (Cloud hidden otherwise): hidden groups yield zero
-// items and no header, so hit tests never see hidden rows.
+// Row counts: Simulation is 6 for every preset (4 presets, separator at
+// index 4, restart at 5); Options is the preset's option count (two-body
+// 2, solar 2, fig-8 1, cloud 0); hidden groups yield zero items and no
+// header, so hit tests never see hidden rows.
 MenuLayout menuLayout(double winW, double winH,
                       std::optional<MenuGroup> openGroup,
                       core::PresetName preset);
@@ -56,5 +59,8 @@ int menuItemCount(MenuGroup group, core::PresetName preset);
 const char* menuGroupLabel(MenuGroup group);
 const char* menuHeaderTooltip(MenuGroup group);
 const char* menuPresetName(core::PresetName preset);
+// Short preset name shown as the Options header label ("Solar",
+// "Two-body", "Fig-8"); empty when the preset has no options.
+const char* menuOptionsHeaderLabel(core::PresetName preset);
 
 }  // namespace nbody::app

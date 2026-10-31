@@ -178,6 +178,7 @@ std::optional<TextField> fieldForItem(MenuGroup group, int index,
             return std::nullopt;
         case MenuGroup::Integrator:
         case MenuGroup::Physics:
+        case MenuGroup::Options:  // fields wired up in the MenuModel task
         case MenuGroup::Count_:
             return std::nullopt;
     }
