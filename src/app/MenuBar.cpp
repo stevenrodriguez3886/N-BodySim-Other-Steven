@@ -47,9 +47,11 @@ constexpr double kHeaderWidths[] = {headerWidthFor(0), headerWidthFor(1),
                                     headerWidthFor(2), headerWidthFor(3),
                                     headerWidthFor(4)};
 constexpr const char* kHeaderTooltips[] = {
-    "Choose the starting configuration", "", "",
+    "Choose the starting configuration",
+    "Choose the integration method",
+    "Choose how much time each step advances",
     "Options for the random-cloud simulation",
-    ""};  // Options header tooltip lands with the tooltips task
+    "Options for the selected simulation"};
 constexpr const char* kPresetLabels[] = {
     "two-body", "solar-system", "random-cloud", "figure-eight"};
 

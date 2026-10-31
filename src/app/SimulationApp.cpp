@@ -76,11 +76,35 @@ std::string formatStats(double fps, double ups, std::size_t bodies,
     return out.str();
 }
 
+// Same shortest-honest-number rendering as MenuModel's option labels
+// (integers bare, fractions at 4 significant digits): mirrored here so
+// the Options header readout matches its dropdown rows.
+std::string formatOptionValue(double value) {
+    if (std::isfinite(value) && value == std::floor(value) &&
+        std::fabs(value) < 1e15) {
+        return std::to_string(static_cast<long long>(value));
+    }
+    std::ostringstream out;
+    out << std::setprecision(4) << value;
+    return out.str();
+}
+
 std::string menuValue(const nbody::app::MenuState& state,
                       nbody::app::MenuGroup group) {
     using nbody::app::MenuGroup;
     if (group == MenuGroup::Cloud) {
         return std::to_string(state.seed);
+    }
+    if (group == MenuGroup::Options) {
+        // Live readout (spec: value-first, like the Cloud seed readout):
+        // solar shows the planet count plus the pluto toggle state;
+        // two-body/fig-8 show the separation. Random-cloud has no
+        // Options header at all.
+        if (state.preset == nbody::core::PresetName::SolarSystem) {
+            return std::to_string(state.planetCount) + " \u00b7 pluto " +
+                   (state.pluto ? "\u2713" : "\u2717");
+        }
+        return formatOptionValue(state.separation);
     }
     if (group == MenuGroup::Physics) {
         const int ticked = nbody::app::menuTickedIndex(state, group);
@@ -207,6 +231,14 @@ void SimulationApp::handleAction(const MenuAction& action) {
 void SimulationApp::applyEffect(MenuEffect effect) {
     switch (effect) {
         case MenuEffect::PresetChanged:
+            // A preset swap can hide the open dropdown's group (the
+            // Options/Cloud slot swap): close the stale dropdown instead
+            // of leaving a hidden group "open" in the state (layout and
+            // hit-testing already hide it; this keeps the state honest).
+            if (menuState_.openGroup &&
+                !menuGroupVisible(*menuState_.openGroup, menuState_)) {
+                menuState_.openGroup.reset();
+            }
             rebuildScene(true);
             break;
         case MenuEffect::IntegratorChanged:
@@ -481,6 +513,14 @@ void SimulationApp::handleEvents() {
                     }
                     if (staged.preset) {
                         menuState_.preset = *staged.preset;
+                        // Same close-on-hiding law as the live preset
+                        // path: a staged swap that hides the open
+                        // group's dropdown closes it.
+                        if (menuState_.openGroup &&
+                            !menuGroupVisible(*menuState_.openGroup,
+                                              menuState_)) {
+                            menuState_.openGroup.reset();
+                        }
                         rebuildScene(true);
                     }
                     if (staged.integrator) {
@@ -919,8 +959,18 @@ void SimulationApp::render() {
             sf::Text label{*font_};
             label.setCharacterSize(12U);
             label.setFillColor(open ? kHudColor : kMenuDimColor);
-            label.setString(std::string(menuGroupLabel(group)) + ": " +
-                            menuValue(menuState_, group));
+            // The Options header wears the preset's short name when it
+            // has one (Solar / Two-body / Fig-8); the plain group label
+            // is only the fallback.
+            std::string name(menuGroupLabel(group));
+            if (group == MenuGroup::Options) {
+                const std::string presetName(
+                    menuOptionsHeaderLabel(menuState_.preset));
+                if (!presetName.empty()) {
+                    name = presetName;
+                }
+            }
+            label.setString(name + ": " + menuValue(menuState_, group));
             label.setPosition(sf::Vector2f{
                 static_cast<float>(rect.topLeft.x + 7.0),
                 static_cast<float>(rect.topLeft.y + 7.0)});

@@ -39,6 +39,21 @@ constexpr char kSeparationTooltip[] = "Distance between the bodies at t=0";
 constexpr char kPathTooltip[] = "Circular orbit or unbound fly-by";
 constexpr char kPlanetsTooltip[] = "How many planets (inside-out)";
 constexpr char kPlutoTooltip[] = "Include Pluto at ~200 units";
+// Tooltips-everywhere task: one-line scene descriptions for the
+// Simulation preset rows (table index == preset row index == enum order).
+constexpr char kTwoBodySceneTooltip[] =
+    "Two bodies orbiting or flying past each other";
+constexpr char kSolarSceneTooltip[] =
+    "A sun with up to eight orbiting planets";
+constexpr char kCloudSceneTooltip[] =
+    "A random swarm of bodies with random velocities";
+constexpr char kFigureEightSceneTooltip[] =
+    "Three bodies tracing a figure-eight";
+constexpr std::array<const char*, 4> kSceneTooltips = {
+    kTwoBodySceneTooltip, kSolarSceneTooltip, kCloudSceneTooltip,
+    kFigureEightSceneTooltip};
+constexpr char kRk4Tooltip[] = "Accurate 4th-order Runge-Kutta stepping";
+constexpr char kEulerTooltip[] = "Fast Euler stepping (drifts over time)";
 
 int presetIndex(core::PresetName preset) {
     switch (preset) {
@@ -358,15 +373,22 @@ std::string menuItemTooltip(MenuGroup group, int index,
     }
     switch (group) {
         case MenuGroup::Simulation:
-            // Preset rows and the separator carry none (D.6); the restart
-            // row is the fixed row 5.
+            // Preset rows carry one-line scene descriptions; the
+            // separator stays empty; restart is the fixed row 5.
+            if (index >= 0 && index < 4) {
+                return kSceneTooltips[static_cast<std::size_t>(index)];
+            }
             if (index == 5) {
                 return kRestartTooltip;
             }
             return {};
         case MenuGroup::Integrator:
+            return index == 0 ? kRk4Tooltip : kEulerTooltip;
         case MenuGroup::Physics:
-            return {};  // dt/integrator rows have none (D.6)
+            // One per dt option, phrased off the row's fraction label.
+            return std::string("Advance ") +
+                   kDtOptions[static_cast<std::size_t>(index)].label +
+                   " s per step";
         case MenuGroup::Cloud:
             switch (index) {
                 case 0:

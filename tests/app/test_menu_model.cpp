@@ -15,6 +15,8 @@ using nbody::app::fieldForItem;
 using nbody::app::menuApply;
 using nbody::app::menuGroupOfField;
 using nbody::app::menuGroupVisible;
+using nbody::app::menuHeaderTooltip;
+using nbody::app::menuItemTooltip;
 using nbody::app::menuPresetName;
 using nbody::app::menuIsStagedActive;
 using nbody::app::menuItemCount;
@@ -559,4 +561,40 @@ TEST_CASE("model_ticked_indices_with_renamed_groups") {
     REQUIRE(menuTickedIndex(state, MenuGroup::Cloud) == -1);
     state.preset = PresetName::SolarSystem;
     REQUIRE(menuTickedIndex(state, MenuGroup::Simulation) == 1);
+}
+
+TEST_CASE("every visible header and row has a tooltip") {
+    // Tooltips-everywhere law (spec D.6 / design goal 1): every header of
+    // every group and every non-separator row of every VISIBLE group
+    // carries a non-empty tooltip, on every preset. Only the Simulation
+    // separator (row 4) stays empty.
+    for (const PresetName preset :
+         {PresetName::TwoBody, PresetName::SolarSystem,
+          PresetName::RandomCloud, PresetName::FigureEight}) {
+        MenuState s;
+        s.preset = preset;
+        CHECK(!std::string(menuHeaderTooltip(MenuGroup::Simulation)).empty());
+        CHECK(!std::string(menuHeaderTooltip(MenuGroup::Integrator)).empty());
+        CHECK(!std::string(menuHeaderTooltip(MenuGroup::Physics)).empty());
+        CHECK(!std::string(menuHeaderTooltip(MenuGroup::Cloud)).empty());
+        CHECK(!std::string(menuHeaderTooltip(MenuGroup::Options)).empty());
+        for (const MenuGroup group :
+             {MenuGroup::Simulation, MenuGroup::Integrator,
+              MenuGroup::Physics, MenuGroup::Cloud, MenuGroup::Options}) {
+            if (!menuGroupVisible(group, s)) {
+                continue;
+            }
+            for (int i = 0; i < menuItemCount(group, s); ++i) {
+                const bool separator =
+                    group == MenuGroup::Simulation && i == 4;
+                if (separator) {
+                    continue;
+                }
+                INFO("preset=" << static_cast<int>(preset)
+                               << " group=" << static_cast<int>(group)
+                               << " row=" << i);
+                CHECK(!menuItemTooltip(group, i, s).empty());
+            }
+        }
+    }
 }

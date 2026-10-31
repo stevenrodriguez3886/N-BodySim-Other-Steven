@@ -381,10 +381,13 @@ TEST_CASE("menu_tooltips_header_table") {
             std::string("Choose the starting configuration"));
     REQUIRE(menuHeaderTooltip(MenuGroup::Cloud) ==
             std::string("Options for the random-cloud simulation"));
-    // Physics/Integrator headers keep today's (empty) tooltips; the
-    // Options header tooltip arrives with the tooltips-everywhere task.
-    REQUIRE(menuHeaderTooltip(MenuGroup::Physics) == std::string(""));
-    REQUIRE(menuHeaderTooltip(MenuGroup::Integrator) == std::string(""));
+    // Tooltips-everywhere task: no header keeps an empty tooltip.
+    REQUIRE(menuHeaderTooltip(MenuGroup::Physics) ==
+            std::string("Choose how much time each step advances"));
+    REQUIRE(menuHeaderTooltip(MenuGroup::Integrator) ==
+            std::string("Choose the integration method"));
+    REQUIRE(menuHeaderTooltip(MenuGroup::Options) ==
+            std::string("Options for the selected simulation"));
 }
 
 TEST_CASE("menu_tooltips_row_table_verbatim") {
@@ -409,9 +412,9 @@ TEST_CASE("menu_tooltips_row_table_verbatim") {
 }
 
 TEST_CASE("menu_tooltips_complete_over_every_visible_row") {
-    // Every visible (group, row) has either a documented string or a
-    // documented empty entry; nothing falls outside the table. dt and
-    // integrator rows have none (spec D.6).
+    // Tooltips-everywhere law: every visible (group, row) carries one of
+    // the documented strings; nothing falls outside the table and only
+    // the Simulation separator (row 4) stays empty (spec D.6).
     const std::set<std::string> documented = {
         "",
         "Choose the starting configuration",
@@ -424,7 +427,18 @@ TEST_CASE("menu_tooltips_complete_over_every_visible_row") {
         "Type a seed value, press Enter",
         "Use a fresh random seed",
         "Number of bodies (2-2000)",
-        "Use a random body count (2-2000)"};
+        "Use a random body count (2-2000)",
+        "Two bodies orbiting or flying past each other",
+        "A sun with up to eight orbiting planets",
+        "A random swarm of bodies with random velocities",
+        "Three bodies tracing a figure-eight",
+        "Accurate 4th-order Runge-Kutta stepping",
+        "Fast Euler stepping (drifts over time)",
+        "Advance 1/30 s per step",
+        "Advance 1/60 s per step",
+        "Advance 1/120 s per step",
+        "Advance 1/240 s per step",
+        "Advance 1/480 s per step"};
 
     for (PresetName preset : kAllPresets) {
         MenuState state;
@@ -437,21 +451,13 @@ TEST_CASE("menu_tooltips_complete_over_every_visible_row") {
                                << " group=" << static_cast<int>(group)
                                << " row=" << row);
                 REQUIRE(documented.count(tip) == 1);
+                // Only the documented separator may be empty.
+                if (!(group == MenuGroup::Simulation && row == 4)) {
+                    CHECK(!tip.empty());
+                }
             }
         }
-        // Preset/dt/integrator action rows deliberately have no tooltips.
-        for (int row = 0; row < 4; ++row) {
-            REQUIRE(menuItemTooltip(MenuGroup::Simulation, row, state)
-                        .empty());
-        }
-        for (int row = 0; row < 2; ++row) {
-            REQUIRE(
-                menuItemTooltip(MenuGroup::Integrator, row, state).empty());
-        }
-        for (int row = 0; row < 5; ++row) {
-            REQUIRE(menuItemTooltip(MenuGroup::Physics, row, state).empty());
-        }
-        // The Simulation separator (row 4) is empty.
+        // The Simulation separator (row 4) is the only empty cell.
         REQUIRE(menuItemTooltip(MenuGroup::Simulation, 4, state).empty());
     }
 }
