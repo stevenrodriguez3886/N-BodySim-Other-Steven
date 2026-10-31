@@ -45,8 +45,8 @@ bool contains(const std::vector<T>& values, T value) {
 
 // Content-sized header table (pure MenuBar layer): minimum 90 px, 7 px
 // per label character + fixed value extents + 16 px padding ->
-// widths {90, 90, 90, 150, 145}; gap 8 -> x = {10, 108, 206, 304}.
-constexpr double kHeaderXs[] = {10.0, 108.0, 206.0, 304.0};
+// widths {184, 135, 121, 150, 145}; gap 8 -> x = {10, 202, 345, 474}.
+constexpr double kHeaderXs[] = {10.0, 202.0, 345.0, 474.0};
 
 }  // namespace
 
@@ -135,7 +135,7 @@ TEST_CASE("menu_options_open_layout") {
     REQUIRE(layout.openGroup == MenuGroup::Options);
     REQUIRE(layout.items.size() == 2);
     REQUIRE(layout.disabledRows.empty());
-    REQUIRE(layout.items[0].topLeft.x == 304.0);  // last header slot
+    REQUIRE(layout.items[0].topLeft.x == 474.0);  // last header slot
     REQUIRE(layout.items[0].size.x == 145.0);
     REQUIRE(layout.items[0].size.y == 24.0);
 
@@ -170,9 +170,9 @@ TEST_CASE("menu_header_geometry") {
         REQUIRE(layout.headerGroups[0] == MenuGroup::Simulation);
         REQUIRE(layout.headerGroups[1] == MenuGroup::Integrator);
         REQUIRE(layout.headerGroups[2] == MenuGroup::Physics);
-        REQUIRE(layout.headers[0].size.x == 90.0);
-        REQUIRE(layout.headers[1].size.x == 90.0);
-        REQUIRE(layout.headers[2].size.x == 90.0);
+        REQUIRE(layout.headers[0].size.x == 184.0);
+        REQUIRE(layout.headers[1].size.x == 135.0);
+        REQUIRE(layout.headers[2].size.x == 121.0);
         if (layout.headerGroups[3] == MenuGroup::Cloud) {
             REQUIRE(layout.headers[3].size.x == 150.0);
         } else {
@@ -186,7 +186,7 @@ TEST_CASE("menu_hit_header_and_item") {
     const auto layout = menuLayout(800.0, 600.0, MenuGroup::Physics,
                                    PresetName::TwoBody);
     const auto& physicsHeader = layout.headers[2];
-    REQUIRE(physicsHeader.topLeft.x == 206.0);
+    REQUIRE(physicsHeader.topLeft.x == 345.0);
     const auto headerHit = menuHitTest(
         layout, {physicsHeader.topLeft.x + physicsHeader.size.x / 2.0,
                  physicsHeader.topLeft.y + physicsHeader.size.y / 2.0});
@@ -201,13 +201,13 @@ TEST_CASE("menu_hit_header_and_item") {
     REQUIRE(itemHit.kind == MenuHitKind::Item);
     REQUIRE(itemHit.group == MenuGroup::Physics);
     REQUIRE(itemHit.index == 2);
-    REQUIRE(item.topLeft.x == 206.0);
+    REQUIRE(item.topLeft.x == 345.0);
     REQUIRE(item.size.x == 140.0);  // max(min item width, physics header)
     REQUIRE(item.size.y == 24.0);
 
     const auto cloudLayout = menuLayout(800.0, 600.0, MenuGroup::Cloud,
                                         PresetName::RandomCloud);
-    REQUIRE(cloudLayout.items[0].topLeft.x == 304.0);
+    REQUIRE(cloudLayout.items[0].topLeft.x == 474.0);
     REQUIRE(cloudLayout.items[0].size.x == 150.0);  // = cloud header width
 
     const auto outsideHit = menuHitTest(
@@ -285,11 +285,11 @@ TEST_CASE("menu_cloud_hidden_layout_and_hit") {
     REQUIRE(hidden.headerGroups[3] == MenuGroup::Options);
     REQUIRE(hidden.items.empty());
     // The last slot hits Options, never a hidden Cloud header.
-    const auto slot = menuHitTest(hidden, {309.0, 20.0});
+    const auto slot = menuHitTest(hidden, {480.0, 20.0});
     REQUIRE(slot.kind == MenuHitKind::Header);
     REQUIRE(slot.group == MenuGroup::Options);
     // And even with a stale openGroup the layout never exposes rows.
-    const auto missItems = menuHitTest(hidden, {309.0, 60.0});
+    const auto missItems = menuHitTest(hidden, {480.0, 60.0});
     REQUIRE(missItems.kind == MenuHitKind::None);
 
     state.preset = PresetName::RandomCloud;

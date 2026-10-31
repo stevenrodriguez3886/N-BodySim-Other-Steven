@@ -16,10 +16,13 @@ constexpr double kHeaderPadding = 16.0;
 // Deterministic content sizing (no font access in the pure layer): a
 // fixed label advance plus a per-group value extent for the widest
 // plausible header readout, floored at kMinimumHeaderWidth. Widest
-// values: the Cloud seed readout (19 chars) and the Options preset
-// readout (planets + pluto, 12 chars); the separation readout is 7.
+// values: the Cloud seed readout (19 chars), the Simulation preset name
+// ("figure-eight", 12) and the Options planets+pluto readout (12).
+// Every header now renders "label: value", so no group gets a zero value
+// extent -- a zero here lets the text overflow into the neighbouring
+// tab (the header-overflow bug this table exists to prevent).
 constexpr double kLabelAdvance = 7.0;
-constexpr double kValueExtents[] = {0.0, 0.0, 0.0, 99.0, 80.0};
+constexpr double kValueExtents[] = {98.0, 49.0, 56.0, 99.0, 80.0};
 constexpr const char* kGroupLabels[] = {"Simulation", "Integrator",
                                         "Physics", "Cloud", "Options"};
 constexpr std::size_t kGroupCount =
@@ -42,7 +45,8 @@ constexpr double headerWidthFor(std::size_t group) {
     return width > kMinimumHeaderWidth ? width : kMinimumHeaderWidth;
 }
 
-// -> {90, 90, 90, 150, 145}: Cloud keeps its 150, Options lands at 145.
+// -> {184, 135, 121, 150, 145}: the first three widened so each "label:
+// value" readout fits; Cloud keeps 150, Options lands at 145.
 constexpr double kHeaderWidths[] = {headerWidthFor(0), headerWidthFor(1),
                                     headerWidthFor(2), headerWidthFor(3),
                                     headerWidthFor(4)};
