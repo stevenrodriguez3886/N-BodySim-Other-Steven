@@ -149,10 +149,9 @@ MenuEffect menuApply(MenuState& state, const MenuAction& action,
 
     switch (action.group) {
         case MenuGroup::Simulation: {
-            // Row table (spec D.1): 0-3 presets, 4 separator, 5+ the
-            // preset's option rows, then separator + restart.
-            const int opts = menuPresetOptionCount(state.preset);
-            if (action.index < 0 || action.index >= 7 + opts) {
+            // Row table (spec D.1): 0-3 presets, 4 separator, 5 restart.
+            // The preset's option rows live in the Options group.
+            if (action.index < 0 || action.index >= 6) {
                 return MenuEffect::None;
             }
             if (action.index < 4) {
@@ -165,24 +164,11 @@ MenuEffect menuApply(MenuState& state, const MenuAction& action,
                 staged.preset.reset();  // live pick supersedes a staged pick
                 return MenuEffect::PresetChanged;
             }
-            if (action.index == 4 || action.index == 5 + opts) {
-                return MenuEffect::None;  // separators
+            if (action.index == 4) {
+                return MenuEffect::None;  // separator
             }
-            if (action.index == 6 + opts) {
-                ++state.restartTick;
-                return MenuEffect::SceneRestart;  // same effect as R
-            }
-            if (action.index == 6 && opts == 2) {
-                if (state.preset == core::PresetName::TwoBody) {
-                    return toggleHyperbolic(state, paused);
-                }
-                if (state.preset == core::PresetName::SolarSystem) {
-                    return togglePluto(state, paused);
-                }
-            }
-            // Field rows (separation/planets) focus the inline editor; the
-            // app routes their edits back through the typed setters.
-            return MenuEffect::None;
+            ++state.restartTick;
+            return MenuEffect::SceneRestart;  // same effect as R
         }
 
         case MenuGroup::Integrator:
@@ -223,7 +209,25 @@ MenuEffect menuApply(MenuState& state, const MenuAction& action,
             // app-side, then flow through menuSetSeed/menuSetBodies.
             return MenuEffect::None;
 
-        case MenuGroup::Options:  // wired up in the MenuModel task
+        case MenuGroup::Options: {
+            // Row 0 is the preset's field row (separation/planets): it
+            // focuses the inline editor, and the app routes the edits back
+            // through the typed setters. Row 1 is the preset's toggle.
+            if (action.index < 0 ||
+                action.index >= menuPresetOptionCount(state.preset)) {
+                return MenuEffect::None;
+            }
+            if (action.index == 1) {
+                if (state.preset == core::PresetName::TwoBody) {
+                    return toggleHyperbolic(state, paused);
+                }
+                if (state.preset == core::PresetName::SolarSystem) {
+                    return togglePluto(state, paused);
+                }
+            }
+            return MenuEffect::None;
+        }
+
         case MenuGroup::Count_:
             return MenuEffect::None;
     }
@@ -294,42 +298,16 @@ std::string menuItemLabel(const MenuState& state, MenuGroup group,
         return {};
     }
     switch (group) {
-        case MenuGroup::Simulation: {
+        case MenuGroup::Simulation:
+            // Fixed table: presets 0-3, separator 4, restart 5.
             if (index < 4) {
                 return menuPresetName(
                     static_cast<core::PresetName>(index));
             }
-            const int opts = menuPresetOptionCount(state.preset);
-            if (index == 4 || index == 5 + opts) {
-                return {};  // separators
+            if (index == 4) {
+                return {};  // separator
             }
-            if (index == 6 + opts) {
-                return "restart scene";
-            }
-            if (index == 5) {
-                switch (state.preset) {
-                    case core::PresetName::TwoBody:
-                    case core::PresetName::FigureEight:
-                        return "separation: " +
-                               formatNumber(state.separation);
-                    case core::PresetName::SolarSystem:
-                        return "planets: " + std::to_string(state.planetCount);
-                    case core::PresetName::RandomCloud:
-                        break;
-                }
-                return {};
-            }
-            if (index == 6 && opts == 2) {
-                if (state.preset == core::PresetName::TwoBody) {
-                    return state.hyperbolic ? "path: hyperbola"
-                                            : "path: orbit";
-                }
-                if (state.preset == core::PresetName::SolarSystem) {
-                    return state.pluto ? "pluto: ✓" : "pluto: ✗";
-                }
-            }
-            return {};
-        }
+            return "restart scene";
         case MenuGroup::Integrator:
             return index == 0 ? "rk4" : "euler";
         case MenuGroup::Physics:
@@ -345,7 +323,28 @@ std::string menuItemLabel(const MenuState& state, MenuGroup group,
                 default:
                     return "random bodies";
             }
-        case MenuGroup::Options:  // wired up in the MenuModel task
+        case MenuGroup::Options:  // bounds-checked against the preset count
+            if (index == 0) {
+                switch (state.preset) {
+                    case core::PresetName::TwoBody:
+                    case core::PresetName::FigureEight:
+                        return "separation: " +
+                               formatNumber(state.separation);
+                    case core::PresetName::SolarSystem:
+                        return "planets: " + std::to_string(state.planetCount);
+                    case core::PresetName::RandomCloud:
+                        break;
+                }
+                return {};
+            }
+            if (state.preset == core::PresetName::TwoBody) {
+                return state.hyperbolic ? "path: hyperbola"
+                                        : "path: orbit";
+            }
+            if (state.preset == core::PresetName::SolarSystem) {
+                return state.pluto ? "pluto: ✓" : "pluto: ✗";
+            }
+            return {};
         case MenuGroup::Count_:
             return {};
     }
@@ -358,36 +357,13 @@ std::string menuItemTooltip(MenuGroup group, int index,
         return {};
     }
     switch (group) {
-        case MenuGroup::Simulation: {
-            const int opts = menuPresetOptionCount(state.preset);
-            if (index == 6 + opts) {
+        case MenuGroup::Simulation:
+            // Preset rows and the separator carry none (D.6); the restart
+            // row is the fixed row 5.
+            if (index == 5) {
                 return kRestartTooltip;
             }
-            if (index < 4 || index == 4 || index == 5 + opts) {
-                return {};  // preset rows and separators: none (D.6)
-            }
-            if (index == 5) {
-                switch (state.preset) {
-                    case core::PresetName::TwoBody:
-                    case core::PresetName::FigureEight:
-                        return kSeparationTooltip;
-                    case core::PresetName::SolarSystem:
-                        return kPlanetsTooltip;
-                    case core::PresetName::RandomCloud:
-                        break;
-                }
-                return {};
-            }
-            if (index == 6 && opts == 2) {
-                if (state.preset == core::PresetName::TwoBody) {
-                    return kPathTooltip;
-                }
-                if (state.preset == core::PresetName::SolarSystem) {
-                    return kPlutoTooltip;
-                }
-            }
             return {};
-        }
         case MenuGroup::Integrator:
         case MenuGroup::Physics:
             return {};  // dt/integrator rows have none (D.6)
@@ -402,7 +378,26 @@ std::string menuItemTooltip(MenuGroup group, int index,
                 default:
                     return "Use a random body count (2-2000)";
             }
-        case MenuGroup::Options:  // wired up in the tooltips task
+        case MenuGroup::Options:  // bounds-checked against the preset count
+            if (index == 0) {
+                switch (state.preset) {
+                    case core::PresetName::TwoBody:
+                    case core::PresetName::FigureEight:
+                        return kSeparationTooltip;
+                    case core::PresetName::SolarSystem:
+                        return kPlanetsTooltip;
+                    case core::PresetName::RandomCloud:
+                        break;
+                }
+                return {};
+            }
+            if (state.preset == core::PresetName::TwoBody) {
+                return kPathTooltip;
+            }
+            if (state.preset == core::PresetName::SolarSystem) {
+                return kPlutoTooltip;
+            }
+            return {};
         case MenuGroup::Count_:
             return {};
     }
@@ -489,10 +484,10 @@ int menuTickedIndex(const MenuState& state, MenuGroup group) {
             }
             return -1;
         case MenuGroup::Cloud:
-            // Field/roll rows: no tick. Toggle state shows in the label
-            // ("path: ...", "pluto: ..."), never as a tick row.
+        case MenuGroup::Options:
+            // Field/roll/toggle rows: no tick. Toggle state shows in the
+            // label ("path: ...", "pluto: ..."), never as a tick row.
             return -1;
-        case MenuGroup::Options:  // wired up in the MenuModel task
         case MenuGroup::Count_:
             return -1;
     }

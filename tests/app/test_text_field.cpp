@@ -127,21 +127,28 @@ TEST_CASE("textfield_initial_values_match_row_labels", "[app][textfield]") {
 }
 
 TEST_CASE("textfield_row_mapping_matches_menu_model", "[app][textfield]") {
-    // D.1/D.2 field rows: Simulation row 5 (separation/planets per preset),
+    // D.1/D.2 field rows: Options row 0 (separation/planets per preset),
     // Cloud rows 0 (seed) / 2 (bodies). Everything else: no field.
-    CHECK(fieldForItem(MenuGroup::Simulation, 5, core::PresetName::TwoBody) ==
+    CHECK(fieldForItem(MenuGroup::Options, 0, core::PresetName::TwoBody) ==
           TextField::Separation);
-    CHECK(fieldForItem(MenuGroup::Simulation, 6, core::PresetName::TwoBody) ==
-          std::nullopt);  // row 6 is the path TOGGLE, not a field
-    CHECK(fieldForItem(MenuGroup::Simulation, 5,
+    CHECK(fieldForItem(MenuGroup::Options, 1, core::PresetName::TwoBody) ==
+          std::nullopt);  // row 1 is the path TOGGLE, not a field
+    CHECK(fieldForItem(MenuGroup::Options, 0,
                        core::PresetName::SolarSystem) == TextField::Planets);
-    CHECK(fieldForItem(MenuGroup::Simulation, 6,
+    CHECK(fieldForItem(MenuGroup::Options, 1,
                        core::PresetName::SolarSystem) == std::nullopt);
-    CHECK(fieldForItem(MenuGroup::Simulation, 5,
+    CHECK(fieldForItem(MenuGroup::Options, 0,
                        core::PresetName::FigureEight) ==
           TextField::Separation);
-    CHECK(fieldForItem(MenuGroup::Simulation, 5,
-                       core::PresetName::RandomCloud) == std::nullopt);
+    // Simulation is presets + separator + restart only: no field rows.
+    for (int row = 0; row < 6; ++row) {
+        CHECK(!fieldForItem(MenuGroup::Simulation, row,
+                            core::PresetName::TwoBody));
+        CHECK(!fieldForItem(MenuGroup::Simulation, row,
+                            core::PresetName::SolarSystem));
+        CHECK(!fieldForItem(MenuGroup::Simulation, row,
+                            core::PresetName::FigureEight));
+    }
     CHECK(fieldForItem(MenuGroup::Cloud, 0, core::PresetName::RandomCloud) ==
           TextField::Seed);
     CHECK(fieldForItem(MenuGroup::Cloud, 1, core::PresetName::RandomCloud) ==
@@ -169,6 +176,6 @@ TEST_CASE("textfield_row_mapping_matches_menu_model", "[app][textfield]") {
     }
     CHECK(menuGroupOfField(TextField::Seed) == MenuGroup::Cloud);
     CHECK(menuGroupOfField(TextField::Bodies) == MenuGroup::Cloud);
-    CHECK(menuGroupOfField(TextField::Separation) == MenuGroup::Simulation);
-    CHECK(menuGroupOfField(TextField::Planets) == MenuGroup::Simulation);
+    CHECK(menuGroupOfField(TextField::Separation) == MenuGroup::Options);
+    CHECK(menuGroupOfField(TextField::Planets) == MenuGroup::Options);
 }

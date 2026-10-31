@@ -77,10 +77,11 @@ private:
     friend struct MenuModelAccess;
 };
 
-// Row layout (spec D.1): Simulation = 4 preset rows, separator, the
-// selected preset's option rows (menuPresetOptionCount), separator, restart
-// (moved out of Physics; same effect as R). Cloud = 4 rows, present only
-// while preset == random-cloud; hidden groups report zero items.
+// Row layout (spec D.1): Simulation = 4 preset rows, separator, restart
+// (moved out of Physics; same effect as R). Options = the selected preset's
+// option rows (menuPresetOptionCount): row 0 the field row, row 1 the
+// toggle. Cloud = 4 rows, present only while preset == random-cloud (it
+// shares the Options slot); hidden groups report zero items.
 MenuEffect menuApply(MenuState& state, const MenuAction& action, bool paused);
 // Typed seed field (spec D.4): the only way the seed changes through the
 // menu (random rolls included, which come through as computed values).

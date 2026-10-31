@@ -1,4 +1,5 @@
 #include "nbody/app/MenuModel.hpp"
+#include "nbody/app/TextField.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,8 +11,11 @@ using nbody::app::MenuAction;
 using nbody::app::MenuEffect;
 using nbody::app::MenuGroup;
 using nbody::app::MenuState;
+using nbody::app::fieldForItem;
 using nbody::app::menuApply;
+using nbody::app::menuGroupOfField;
 using nbody::app::menuGroupVisible;
+using nbody::app::menuPresetName;
 using nbody::app::menuIsStagedActive;
 using nbody::app::menuItemCount;
 using nbody::app::menuPresetOptionCount;
@@ -25,16 +29,15 @@ using nbody::app::menuTakeStaged;
 using nbody::app::menuTickedIndex;
 using nbody::app::menuTogglePath;
 using nbody::app::menuTogglePluto;
+using nbody::app::TextField;
 using nbody::core::IntegratorKind;
 using nbody::core::PresetName;
 
 namespace {
 
-// The restart row is the LAST Simulation row; its index shifts with the
-// selected preset's option-row count (spec D.1).
-int restartRow(PresetName preset) {
-    return 6 + nbody::app::menuPresetOptionCount(preset);
-}
+// Simulation is a fixed 6-row table (spec D.1 rework): 0-3 presets, 4
+// separator, 5 restart — the preset option rows live in Options now.
+constexpr int kRestartRow = 5;
 
 }  // namespace
 
@@ -95,8 +98,8 @@ TEST_CASE("model_take_staged_returns_and_clears_staged_values") {
 }
 
 TEST_CASE("model_restart_applies_while_paused") {
-    MenuState state;  // default preset two-body: restart sits at row 8.
-    REQUIRE(menuApply(state, {MenuGroup::Simulation, 8}, true) ==
+    MenuState state;  // restart sits at the fixed Simulation row 5.
+    REQUIRE(menuApply(state, {MenuGroup::Simulation, kRestartRow}, true) ==
             MenuEffect::SceneRestart);
     REQUIRE(state.restartTick == 1);
     REQUIRE(menuStaged(state).empty());
@@ -112,9 +115,8 @@ TEST_CASE("model_restart_while_paused_preserves_staged") {
             MenuEffect::Staged);
     REQUIRE(menuSetSeed(state, 1234, true) == MenuEffect::Staged);
 
-    // state.preset is still two-body (preset change was only staged), so the
-    // restart row is 6 + two-body's 2 option rows = 8.
-    REQUIRE(menuApply(state, {MenuGroup::Simulation, 8}, true) ==
+    // The restart row is the fixed Simulation row 5 for every preset.
+    REQUIRE(menuApply(state, {MenuGroup::Simulation, kRestartRow}, true) ==
             MenuEffect::SceneRestart);
     CHECK(state.restartTick == 1);
     CHECK(menuStaged(state).preset == PresetName::FigureEight);
@@ -222,8 +224,8 @@ TEST_CASE("model_visibility_matrix_two_presets_x_four_groups") {
 
 TEST_CASE("model_preset_option_counts_and_simulation_row_tables") {
     // Option rows per preset (spec D.1/D.2): two-body 2, solar 2, cloud 0,
-    // figure-eight 1. Row count = 4 presets + separator + options +
-    // separator + restart = 7 + options.
+    // figure-eight 1 — they live in the Options group. Simulation is the
+    // fixed 6-row table: 4 presets, separator, restart.
     REQUIRE(menuPresetOptionCount(PresetName::TwoBody) == 2);
     REQUIRE(menuPresetOptionCount(PresetName::SolarSystem) == 2);
     REQUIRE(menuPresetOptionCount(PresetName::RandomCloud) == 0);
@@ -236,24 +238,101 @@ TEST_CASE("model_preset_option_counts_and_simulation_row_tables") {
     for (PresetName preset : presets) {
         MenuState state;
         state.preset = preset;
-        const int opts = menuPresetOptionCount(preset);
-        REQUIRE(menuItemCount(MenuGroup::Simulation, state) == 7 + opts);
-        REQUIRE(restartRow(preset) == 6 + opts);
+        REQUIRE(menuItemCount(MenuGroup::Simulation, state) == 6);
+        REQUIRE(menuItemCount(MenuGroup::Options, state) ==
+                menuPresetOptionCount(preset));
 
         // Separators and out-of-range rows never act...
         REQUIRE(menuApply(state, {MenuGroup::Simulation, 4}, false) ==
                 MenuEffect::None);
-        REQUIRE(menuApply(state, {MenuGroup::Simulation, 5 + opts}, false) ==
-                MenuEffect::None);
-        REQUIRE(menuApply(state, {MenuGroup::Simulation, 7 + opts}, false) ==
+        REQUIRE(menuApply(state, {MenuGroup::Simulation, 6}, false) ==
                 MenuEffect::None);
         REQUIRE(menuApply(state, {MenuGroup::Simulation, -1}, false) ==
                 MenuEffect::None);
-        // ...while the restart row always acts, live and paused.
-        REQUIRE(menuApply(state, {MenuGroup::Simulation, restartRow(preset)},
+        // ...while the restart row always acts, live and paused, and reads
+        // "restart scene" for every preset.
+        REQUIRE(menuItemLabel(state, MenuGroup::Simulation, kRestartRow) ==
+                "restart scene");
+        REQUIRE(menuApply(state, {MenuGroup::Simulation, kRestartRow},
                           false) == MenuEffect::SceneRestart);
         REQUIRE(state.restartTick == 1);
+        REQUIRE(menuApply(state, {MenuGroup::Simulation, kRestartRow},
+                          true) == MenuEffect::SceneRestart);
+        REQUIRE(state.restartTick == 2);
+
+        // Out-of-range Options rows never act (fig-8 has a single row).
+        const int opts = menuPresetOptionCount(preset);
+        REQUIRE(menuApply(state, {MenuGroup::Options, opts}, false) ==
+                MenuEffect::None);
+        REQUIRE(menuApply(state, {MenuGroup::Options, -1}, false) ==
+                MenuEffect::None);
     }
+}
+
+TEST_CASE("Simulation rows are presets + separator + restart only") {
+    MenuState s; s.preset = PresetName::SolarSystem;
+    for (int i = 0; i < 4; ++i)
+        CHECK(menuItemLabel(s, MenuGroup::Simulation, i) ==
+              menuPresetName(static_cast<PresetName>(i)));
+    CHECK(menuItemLabel(s, MenuGroup::Simulation, 4).empty());  // separator
+    CHECK(menuItemLabel(s, MenuGroup::Simulation, 5) == "restart scene");
+    CHECK(menuApply(s, {MenuGroup::Simulation, 5}, false) ==
+          MenuEffect::SceneRestart);
+    // The every-preset law: restart label and effect hold for all presets.
+    for (const PresetName preset :
+         {PresetName::TwoBody, PresetName::SolarSystem,
+          PresetName::RandomCloud, PresetName::FigureEight}) {
+        s.preset = preset;
+        CHECK(menuItemLabel(s, MenuGroup::Simulation, 5) == "restart scene");
+        CHECK(menuApply(s, {MenuGroup::Simulation, 5}, false) ==
+              MenuEffect::SceneRestart);
+    }
+}
+
+TEST_CASE("Options rows carry the preset option labels and effects") {
+    MenuState s; s.preset = PresetName::SolarSystem; s.planetCount = 5;
+    CHECK(menuItemLabel(s, MenuGroup::Options, 0) == "planets: 5");
+    s.pluto = true;
+    CHECK(menuItemLabel(s, MenuGroup::Options, 1) == "pluto: \u2713");
+    CHECK(menuApply(s, {MenuGroup::Options, 1}, false) ==
+          MenuEffect::PlutoChanged);
+    s.preset = PresetName::TwoBody;
+    CHECK(menuItemLabel(s, MenuGroup::Options, 0) == "separation: 10");
+    CHECK(menuApply(s, {MenuGroup::Options, 1}, false) ==
+          MenuEffect::PathChanged);
+    // Toggle state lives in the labels, never in a tick row.
+    CHECK(menuTickedIndex(s, MenuGroup::Options) == -1);
+    // Tooltips ride along with the moved rows (spec D.6 strings).
+    CHECK(menuItemTooltip(MenuGroup::Options, 0,
+                          s) == "Distance between the bodies at t=0");
+    CHECK(menuItemTooltip(MenuGroup::Options, 1, s) ==
+          "Circular orbit or unbound fly-by");
+    s.preset = PresetName::SolarSystem;
+    CHECK(menuItemTooltip(MenuGroup::Options, 0, s) ==
+          "How many planets (inside-out)");
+    CHECK(menuItemTooltip(MenuGroup::Options, 1, s) ==
+          "Include Pluto at ~200 units");
+}
+
+TEST_CASE("Options toggles keep the staging law") {
+    MenuState s; s.preset = PresetName::SolarSystem;
+    CHECK(menuApply(s, {MenuGroup::Options, 1}, true) == MenuEffect::Staged);
+    CHECK(menuStaged(s).pluto == true);
+    CHECK(menuApply(s, {MenuGroup::Options, 1}, true) == MenuEffect::Staged);
+    CHECK(menuStaged(s).pluto == false);  // flip vs staged, last-write-wins
+}
+
+TEST_CASE("fields moved to Options") {
+    CHECK(fieldForItem(MenuGroup::Options, 0, PresetName::SolarSystem) ==
+          TextField::Planets);
+    CHECK(fieldForItem(MenuGroup::Options, 0, PresetName::TwoBody) ==
+          TextField::Separation);
+    CHECK(!fieldForItem(MenuGroup::Options, 1, PresetName::SolarSystem));
+    CHECK(!fieldForItem(MenuGroup::Simulation, 5,
+                        PresetName::SolarSystem));  // restart, no field
+    CHECK(menuGroupOfField(TextField::Planets) == MenuGroup::Options);
+    CHECK(menuGroupOfField(TextField::Separation) == MenuGroup::Options);
+    CHECK(menuGroupOfField(TextField::Seed) == MenuGroup::Cloud);
 }
 
 TEST_CASE("model_physics_lost_restart") {
@@ -274,11 +353,11 @@ TEST_CASE("model_toggle_path_row_and_setter") {
     MenuState state;  // two-body default
     REQUIRE(state.hyperbolic == false);
 
-    // Row click (two-body option row 6 = the path toggle), live.
-    REQUIRE(menuApply(state, {MenuGroup::Simulation, 6}, false) ==
+    // Row click (two-body's Options row 1 = the path toggle), live.
+    REQUIRE(menuApply(state, {MenuGroup::Options, 1}, false) ==
             MenuEffect::PathChanged);
     REQUIRE(state.hyperbolic == true);
-    REQUIRE(menuApply(state, {MenuGroup::Simulation, 6}, false) ==
+    REQUIRE(menuApply(state, {MenuGroup::Options, 1}, false) ==
             MenuEffect::PathChanged);
     REQUIRE(state.hyperbolic == false);
 
@@ -302,8 +381,8 @@ TEST_CASE("model_toggle_pluto_row_and_setter") {
     state.preset = PresetName::SolarSystem;
     REQUIRE(state.pluto == false);
 
-    // Row click (solar-system option row 6 = the pluto toggle), live.
-    REQUIRE(menuApply(state, {MenuGroup::Simulation, 6}, false) ==
+    // Row click (solar-system's Options row 1 = the pluto toggle), live.
+    REQUIRE(menuApply(state, {MenuGroup::Options, 1}, false) ==
             MenuEffect::PlutoChanged);
     REQUIRE(state.pluto == true);
 
@@ -319,16 +398,19 @@ TEST_CASE("model_toggle_pluto_row_and_setter") {
 }
 
 TEST_CASE("model_option_field_rows_do_not_act_through_menuApply") {
-    // Field rows (separation/planets) focus the inline editor app-side
-    // (Task 4); menuApply itself never mutates.
+    // Options row 0 (separation/planets) focuses the inline editor
+    // app-side (Task 4); menuApply itself never mutates.
     MenuState state;
-    REQUIRE(menuApply(state, {MenuGroup::Simulation, 5}, false) ==
+    REQUIRE(menuApply(state, {MenuGroup::Options, 0}, false) ==
             MenuEffect::None);
     state.preset = PresetName::SolarSystem;
-    REQUIRE(menuApply(state, {MenuGroup::Simulation, 5}, false) ==
+    REQUIRE(menuApply(state, {MenuGroup::Options, 0}, false) ==
             MenuEffect::None);
     state.preset = PresetName::FigureEight;
-    REQUIRE(menuApply(state, {MenuGroup::Simulation, 5}, false) ==
+    REQUIRE(menuApply(state, {MenuGroup::Options, 0}, false) ==
+            MenuEffect::None);
+    // Fig-8 has no row 1 at all (single option row).
+    REQUIRE(menuApply(state, {MenuGroup::Options, 1}, false) ==
             MenuEffect::None);
     REQUIRE(menuStaged(state).empty());
 }
@@ -451,8 +533,14 @@ TEST_CASE("model_staged_summary_full_contract_order") {
             MenuEffect::Staged);
     REQUIRE(menuSetSeed(state, 7, true) == MenuEffect::Staged);
     REQUIRE(menuSetBodies(state, 300, true) == MenuEffect::Staged);
+    // separation/planets are edited through Options row 0's editor (the
+    // setters below are what the field commits); the path toggle rides an
+    // Options row click (live preset is still two-body — solar is only
+    // staged). Pluto goes through its setter, as the Options row 1 toggle
+    // under the staged solar preset would.
     REQUIRE(menuSetSeparation(state, 20.0, true) == MenuEffect::Staged);
-    REQUIRE(menuTogglePath(state, true) == MenuEffect::Staged);
+    REQUIRE(menuApply(state, {MenuGroup::Options, 1}, true) ==
+            MenuEffect::Staged);
     REQUIRE(menuSetPlanets(state, 5, true) == MenuEffect::Staged);
     REQUIRE(menuTogglePluto(state, true) == MenuEffect::Staged);
     REQUIRE(menuStagedSummary(state) ==

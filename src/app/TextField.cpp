@@ -163,8 +163,11 @@ std::optional<TextField> fieldForItem(MenuGroup group, int index,
             }
             return std::nullopt;  // random seed / random bodies are buttons
         case MenuGroup::Simulation:
-            if (index != 5) {
-                return std::nullopt;  // 0-3 presets, 4 sep, 6 toggle, restart
+            // Presets, separator, restart only (spec D.1): no field rows.
+            return std::nullopt;
+        case MenuGroup::Options:
+            if (index != 0) {
+                return std::nullopt;  // row 1 is a toggle button
             }
             switch (preset) {
                 case core::PresetName::TwoBody:
@@ -173,12 +176,11 @@ std::optional<TextField> fieldForItem(MenuGroup group, int index,
                 case core::PresetName::SolarSystem:
                     return TextField::Planets;
                 case core::PresetName::RandomCloud:
-                    break;  // no option rows on Simulation (D.2)
+                    break;  // no option rows (D.2)
             }
             return std::nullopt;
         case MenuGroup::Integrator:
         case MenuGroup::Physics:
-        case MenuGroup::Options:  // fields wired up in the MenuModel task
         case MenuGroup::Count_:
             return std::nullopt;
     }
@@ -192,7 +194,7 @@ MenuGroup menuGroupOfField(TextField field) {
             return MenuGroup::Cloud;
         case TextField::Separation:
         case TextField::Planets:
-            return MenuGroup::Simulation;
+            return MenuGroup::Options;
     }
     return MenuGroup::Count_;  // unreachable
 }
