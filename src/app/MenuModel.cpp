@@ -357,7 +357,7 @@ std::string menuItemLabel(const MenuState& state, MenuGroup group,
                                         : "path: orbit";
             }
             if (state.preset == core::PresetName::SolarSystem) {
-                return state.pluto ? "pluto: ✓" : "pluto: ✗";
+                return state.pluto ? "pluto: on" : "pluto: off";
             }
             return {};
         case MenuGroup::Count_:

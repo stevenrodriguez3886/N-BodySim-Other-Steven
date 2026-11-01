@@ -72,9 +72,24 @@ private:
     // (spec D.4): nullopt = no field focused. Enter commits through the
     // staging law, Esc cancels the edit only, click-away cancels then
     // processes, Ctrl+C/X/V go to the clipboard (paste grammar-filtered).
-    // The caret blink reuses statsClock_'s 0.5 s period.
+    // The caret blink reuses statsClock_'s 0.5 s period. The buffer now
+    // carries a real caret + selection anchor (spec Goal 4): clicks inside
+    // the row place the caret, held drags extend the selection
+    // (fieldSelecting_), and Ctrl+C/X/V use the FieldText clipboard laws.
     std::optional<TextField> activeField_;
-    std::string fieldBuffer_;
+    FieldText fieldText_;
+    bool fieldSelecting_ = false;  // left button held inside the field row
+    // Pixels per character inside the focused field: the '0' glyph advance
+    // at the 13 px type size, measured at editor open (digits dominate
+    // these fields; a spec-sanctioned approximation for click/drag math
+    // and the selection-band/caret positions).
+    double fieldAdvance_ = 0.0;
+    double fieldDragLeft_ = 0.0;   // focused row's text-start x (drag map)
+    double fieldDragWidth_ = 0.0;  // fieldAdvance_ * buffer size at press
+    // Double-press detector (SFML 3.0 has no double-click event): a left
+    // press within 250 ms AND 4 px of the previous left press selects all.
+    sf::Clock fieldPressClock_;
+    sf::Vector2i fieldLastPressPos_{-1000000, -1000000};
     // Hover tooltip state (spec D.6): target last resolved on MouseMoved
     // (header or open-group row under the cursor); the dwell clock restarts
     // whenever the target changes. Empty text = nothing to show.

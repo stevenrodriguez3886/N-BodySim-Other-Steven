@@ -19,18 +19,10 @@ namespace nbody::app {
 // display-free (same rationale as StepPlanning/Starfield).
 enum class TextField : std::uint8_t { Seed, Bodies, Separation, Planets };
 
-// Typing rule (D.4): a char is accepted only if the result stays within
-// the field's grammar (seed: digits + one leading '-', 19 chars; bodies:
-// digits, 4; separation: digits + at most one '.', 7; planets: 1 digit).
-// Accepted digits trim leading zeros, with the same laws as today's seed
-// editor (a lone '-' or '.' stays, an all-zero run collapses to "0").
-// Returns false and leaves the buffer untouched when the char overflows
-// the grammar.
-bool fieldAppendChar(TextField field, char ch, std::string& buffer);
-
-// Backspace deletes one character (empty stays empty; an empty buffer
-// commits as the field's empty value, see fieldParseValue).
-void fieldBackspace(TextField field, std::string& buffer);
+// (The old buffer-only fieldAppendChar/fieldBackspace live on privately
+// inside TextField.cpp: the caret model below subsumes them -- typing with
+// caret == anchor == size() IS append, and Backspace is fieldEditDelete
+// with forward = false.)
 
 // Paste filter (D.4): keeps only the characters that fit the field's
 // grammar, applying the SAME overflow rules as typing (first-come-first-
@@ -43,7 +35,7 @@ std::string fieldSanitizePaste(TextField field, const std::string& pasted);
 // [0, size()]; caret != anchor means a selection spans [selStart, selEnd).
 // Editors seed this from the fieldInitial* prefills with caret = anchor =
 // size (end of text). Every mutator below is grammar-checked against the
-// SAME laws as fieldAppendChar (sign at buffer position 0 only, one dot,
+// SAME laws as the paste filter (sign at buffer position 0 only, one dot,
 // leading-zero trim, length cap): a mutation that would break the grammar
 // leaves buffer, caret AND anchor completely untouched and returns false.
 struct FieldText {

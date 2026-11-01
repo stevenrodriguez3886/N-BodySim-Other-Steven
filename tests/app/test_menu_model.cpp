@@ -295,7 +295,7 @@ TEST_CASE("Options rows carry the preset option labels and effects") {
     MenuState s; s.preset = PresetName::SolarSystem; s.planetCount = 5;
     CHECK(menuItemLabel(s, MenuGroup::Options, 0) == "planets: 5");
     s.pluto = true;
-    CHECK(menuItemLabel(s, MenuGroup::Options, 1) == "pluto: \u2713");
+    CHECK(menuItemLabel(s, MenuGroup::Options, 1) == "pluto: on");
     CHECK(menuApply(s, {MenuGroup::Options, 1}, false) ==
           MenuEffect::PlutoChanged);
     s.preset = PresetName::TwoBody;

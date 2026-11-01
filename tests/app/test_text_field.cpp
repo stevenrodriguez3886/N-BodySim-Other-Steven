@@ -14,12 +14,15 @@ namespace core = nbody::core;
 namespace {
 
 // Type a whole string char by char, returning the accepted suffix.
+// Append-mode typing: caret/anchor parked at the end, where
+// fieldInsertChar IS the old fieldAppendChar law (that pair is now
+// file-private inside TextField.cpp).
 std::string typeAll(TextField field, const std::string& chars) {
-    std::string buffer;
+    FieldText text;
     for (const char ch : chars) {
-        fieldAppendChar(field, ch, buffer);
+        fieldInsertChar(field, ch, text);  // caret == anchor == size()
     }
-    return buffer;
+    return text.buffer;
 }
 
 }  // namespace
@@ -68,16 +71,22 @@ TEST_CASE("textfield_bodies_separation_planets_grammars", "[app][textfield]") {
 }
 
 TEST_CASE("textfield_backspace", "[app][textfield]") {
-    std::string buffer = typeAll(TextField::Seed, "-123");
-    fieldBackspace(TextField::Seed, buffer);
-    CHECK(buffer == "-12");
-    fieldBackspace(TextField::Seed, buffer);
-    fieldBackspace(TextField::Seed, buffer);
-    CHECK(buffer == "-");
-    fieldBackspace(TextField::Seed, buffer);  // down to empty (commits 0)
-    CHECK(buffer.empty());
-    fieldBackspace(TextField::Seed, buffer);  // empty stays empty
-    CHECK(buffer.empty());
+    // Backspace == fieldEditDelete backward with the caret at the end
+    // (the old buffer-only fieldBackspace is gone).
+    FieldText text;
+    text.buffer = typeAll(TextField::Seed, "-123");
+    text.caret = text.buffer.size();
+    text.anchor = text.caret;
+    CHECK(fieldEditDelete(TextField::Seed, text, false));
+    CHECK(text.buffer == "-12");
+    CHECK(fieldEditDelete(TextField::Seed, text, false));
+    CHECK(text.buffer == "-1");
+    CHECK(fieldEditDelete(TextField::Seed, text, false));
+    CHECK(text.buffer == "-");
+    CHECK(fieldEditDelete(TextField::Seed, text, false));  // down to empty
+    CHECK(text.buffer.empty());                            // (commits 0)
+    CHECK(!fieldEditDelete(TextField::Seed, text, false));  // empty stays
+    CHECK(text.buffer.empty());
 }
 
 TEST_CASE("textfield_paste_filter_matches_typing", "[app][textfield]") {

@@ -40,7 +40,14 @@ constexpr sf::Color kMenuSelectColor(150, 230, 170);   // current-item dot
 constexpr sf::Color kMenuPanelColor(22, 25, 38, 242);
 constexpr sf::Color kMenuBorderColor(70, 78, 100);
 constexpr sf::Color kMenuAccentColor(120, 190, 255);  // focused seed field border
+constexpr sf::Color kFieldSelectionColor(58, 96, 168);  // field selection band
 constexpr double kMenuStripBottom = 34.0;
+
+// fieldIndexForFraction's input contract: the app clamps the pixel ratio
+// to [0, 1] before calling it (finite inputs by construction here).
+double clampUnit(double value) {
+    return value < 0.0 ? 0.0 : (value > 1.0 ? 1.0 : value);
+}
 
 // SFML 3.0.x has NO Font::getDefault() (that is a later 3.1/master API;
 // verified against build/_deps/sfml-src/include/SFML/Graphics/Font.hpp — the
@@ -101,8 +108,10 @@ std::string menuValue(const nbody::app::MenuState& state,
         // two-body/fig-8 show the separation. Random-cloud has no
         // Options header at all.
         if (state.preset == nbody::core::PresetName::SolarSystem) {
-            return std::to_string(state.planetCount) + " \u00b7 pluto " +
-                   (state.pluto ? "\u2713" : "\u2717");
+            // Plain words only: the loaded system font has no ✓/✗/·
+            // glyphs (live-verified: they render as '?').
+            return std::to_string(state.planetCount) + " / pluto " +
+                   (state.pluto ? "on" : "off");
         }
         return formatOptionValue(state.separation);
     }
@@ -271,25 +280,36 @@ void SimulationApp::applyEffect(MenuEffect effect) {
 // stays open; Enter commits, Esc ends the edit only, click-away cancels.
 void SimulationApp::openFieldEditor(TextField field) {
     activeField_ = field;
-    fieldBuffer_.clear();
+    fieldText_ = {};
+    fieldSelecting_ = false;
+    // Cursor-position math (clicks, drags, band/caret x) runs on the '0'
+    // glyph advance at the 13 px field type size, measured once here:
+    // digits dominate these buffers, so one digit's advance is the spec's
+    // sanctioned approximation for the whole string's layout.
+    fieldAdvance_ =
+        font_ ? static_cast<double>(font_->getGlyph(U'0', 13, false).advance)
+              : 0.0;
     // Dwell bookkeeping: focusing a field is a click, and clicks hide
     // tooltips (D.6); the next MouseMoved re-targets.
     tooltipTarget_ = {};
     tooltipText_.clear();
     switch (field) {
         case TextField::Seed:
-            fieldBuffer_ = fieldInitialSeed(menuState_.seed);
+            fieldText_.buffer = fieldInitialSeed(menuState_.seed);
             break;
         case TextField::Bodies:
-            fieldBuffer_ = fieldInitialBodies(menuState_.bodies);
+            fieldText_.buffer = fieldInitialBodies(menuState_.bodies);
             break;
         case TextField::Separation:
-            fieldBuffer_ = fieldInitialSeparation(menuState_.separation);
+            fieldText_.buffer = fieldInitialSeparation(menuState_.separation);
             break;
         case TextField::Planets:
-            fieldBuffer_ = fieldInitialPlanets(menuState_.planetCount);
+            fieldText_.buffer = fieldInitialPlanets(menuState_.planetCount);
             break;
     }
+    // Prefilled editors open with caret AND anchor at the end of text.
+    fieldText_.caret = fieldText_.buffer.size();
+    fieldText_.anchor = fieldText_.buffer.size();
 }
 
 void SimulationApp::commitFieldEdit() {
@@ -302,34 +322,36 @@ void SimulationApp::commitFieldEdit() {
     MenuEffect effect = MenuEffect::None;
     switch (field) {
         case TextField::Seed:
-            effect = menuSetSeed(menuState_, fieldParseSeed(fieldBuffer_),
-                                 paused_);
+            effect = menuSetSeed(menuState_,
+                                 fieldParseSeed(fieldText_.buffer), paused_);
             break;
         case TextField::Bodies:
-            effect = menuSetBodies(menuState_, fieldParseBodies(fieldBuffer_),
-                                   paused_);
+            effect =
+                menuSetBodies(menuState_, fieldParseBodies(fieldText_.buffer),
+                              paused_);
             break;
         case TextField::Separation:
             effect = menuSetSeparation(
-                menuState_, fieldParseSeparation(fieldBuffer_), paused_);
+                menuState_, fieldParseSeparation(fieldText_.buffer), paused_);
             break;
         case TextField::Planets:
-            effect =
-                menuSetPlanets(menuState_, fieldParsePlanets(fieldBuffer_),
-                               paused_);
+            effect = menuSetPlanets(
+                menuState_, fieldParsePlanets(fieldText_.buffer), paused_);
             break;
     }
-    fieldBuffer_.clear();
+    fieldText_ = {};
+    fieldSelecting_ = false;
     // Same dropdown-close behavior as activating any other item, whether
     // the change applied live or staged.
     menuState_.openGroup.reset();
     applyEffect(effect);
 }
 
-// Ctrl+C/X/V while a field is focused (spec D.4). Copy takes the buffer,
-// cut copies then clears, paste REPLACES the buffer with the clipboard
-// filtered through the field grammar (same overflow rules as typing).
-// Any other Ctrl combo is swallowed without touching the buffer.
+// Ctrl+C/X/V while a field is focused (spec D.4 + Goal 4). Copy takes the
+// selection span, or the whole buffer with no selection; cut copies then
+// deletes the selection (whole buffer when there is none); paste runs the
+// clipboard through the field grammar AT the caret, replacing the active
+// selection. Any other Ctrl combo is swallowed without touching the text.
 void SimulationApp::handleFieldClipboard(const sf::Event::KeyPressed& key) {
     if (!activeField_) {
         return;
@@ -337,16 +359,21 @@ void SimulationApp::handleFieldClipboard(const sf::Event::KeyPressed& key) {
     using Key = sf::Keyboard::Key;
     switch (key.code) {
         case Key::C:
-            sf::Clipboard::setString(fieldBuffer_);
+            sf::Clipboard::setString(fieldCopyText(fieldText_));
             break;
         case Key::X:
-            sf::Clipboard::setString(fieldBuffer_);
-            fieldBuffer_.clear();
+            sf::Clipboard::setString(fieldCopyText(fieldText_));
+            if (fieldText_.hasSelection()) {
+                fieldDeleteSelection(fieldText_);
+            } else {
+                fieldText_.buffer.clear();  // no selection: cut takes all
+                fieldText_.caret = 0;
+                fieldText_.anchor = 0;
+            }
             break;
         case Key::V: {
             const sf::String clip = sf::Clipboard::getString();
-            fieldBuffer_ =
-                fieldSanitizePaste(*activeField_, clip.toAnsiString());
+            fieldApplyPaste(*activeField_, clip.toAnsiString(), fieldText_);
             break;
         }
         default:
@@ -439,16 +466,18 @@ void SimulationApp::handleEvents() {
         // X11, WindowImplX11 pushes KeyPressed before TextEntered) -- never
         // rely on it here. Correctness is order-independent because the two
         // editing branches are disjoint: the TextEntered branch consumes
-        // only grammar-valid chars (the shared fieldAppendChar), the
-        // KeyPressed branch only Enter/Escape/Backspace/Ctrl+CXV (plus
-        // swallowing all other keys while editing), so no input can
-        // double-handle under either platform order.
+        // only grammar-valid chars (the shared fieldInsertChar), the
+        // KeyPressed branch only Enter/Escape/Backspace/Delete/caret keys/
+        // Ctrl+CXV (plus swallowing all other keys while editing), so no
+        // input can double-handle under either platform order.
         if (activeField_) {
             if (const auto* text = ev->getIf<sf::Event::TextEntered>()) {
                 const char32_t ch = text->unicode;
                 if (ch >= U' ' && ch < U'\x7f') {
-                    fieldAppendChar(*activeField_,
-                                    static_cast<char>(ch), fieldBuffer_);
+                    // Typing inserts AT the caret (replacing the selection
+                    // when one is active); the grammar laws are Task 4's.
+                    fieldInsertChar(*activeField_, static_cast<char>(ch),
+                                    fieldText_);
                 }
                 // Every other codepoint (control chars incl. Enter/Backspace
                 // and the Ctrl combos' 0x03/0x18/0x16, plus >= 0x80) is
@@ -467,10 +496,23 @@ void SimulationApp::handleEvents() {
                     // app survives -- deliberately no fall-through to the
                     // dropdown-close/quit Escape law below.
                     activeField_.reset();
-                    fieldBuffer_.clear();
+                    fieldText_ = {};
+                    fieldSelecting_ = false;
                 } else if (key->code == sf::Keyboard::Key::Backspace) {
-                    fieldBackspace(*activeField_, fieldBuffer_);  // empty
-                    // buffer commits 0
+                    fieldEditDelete(*activeField_, fieldText_,
+                                    false);  // empty buffer commits 0
+                } else if (key->code == sf::Keyboard::Key::Delete) {
+                    fieldEditDelete(*activeField_, fieldText_, true);
+                } else if (key->code == sf::Keyboard::Key::Left) {
+                    // Shift extends the selection (anchor stays), plain
+                    // moves collapse it onto the caret (Task 4's anchor law).
+                    fieldMoveCaret(fieldText_, -1, key->shift);
+                } else if (key->code == sf::Keyboard::Key::Right) {
+                    fieldMoveCaret(fieldText_, 1, key->shift);
+                } else if (key->code == sf::Keyboard::Key::Home) {
+                    fieldMoveCaretTo(fieldText_, false, key->shift);
+                } else if (key->code == sf::Keyboard::Key::End) {
+                    fieldMoveCaretTo(fieldText_, true, key->shift);
                 } else if (key->code == sf::Keyboard::Key::Enter) {
                     commitFieldEdit();
                 }
@@ -581,23 +623,70 @@ void SimulationApp::handleEvents() {
                 static_cast<double>(size.x), static_cast<double>(size.y),
                 menuState_.openGroup, menuState_.preset);
             const MenuHit hit = menuHitTest(layout, position);
+            // Double-press detector for the focused field (spec Goal 4;
+            // SFML 3.0 has no double-click event): every left press
+            // records its time+spot, and a press within 250 ms AND 4 px
+            // of the previous left press reads as a double-click.
+            const bool left = press->button == sf::Mouse::Button::Left;
+            const long long dpx = press->position.x - fieldLastPressPos_.x;
+            const long long dpy = press->position.y - fieldLastPressPos_.y;
+            const bool doublePress =
+                left &&
+                fieldPressClock_.getElapsedTime() < sf::milliseconds(250) &&
+                dpx * dpx + dpy * dpy < 16;  // 4 px radius
+            if (left) {
+                fieldPressClock_.restart();
+                fieldLastPressPos_ = press->position;
+            }
             if (activeField_) {
                 // The focused field's own row (and its group header) keep
                 // focus; anywhere else the edit is cancelled first, then
                 // the click falls through to normal handling below -- menu
                 // hit or drag start, no early return (D.4).
-                const bool inField =
-                    press->button == sf::Mouse::Button::Left &&
-                    ((hit.kind == MenuHitKind::Item &&
-                      fieldForItem(hit.group, hit.index, menuState_.preset) ==
-                          *activeField_) ||
-                     (hit.kind == MenuHitKind::Header &&
-                      menuGroupOfField(*activeField_) == hit.group));
-                if (inField) {
-                    continue;  // click inside the field: focus stays, no-op
+                const bool onFieldRow =
+                    left && hit.kind == MenuHitKind::Item &&
+                    fieldForItem(hit.group, hit.index, menuState_.preset) ==
+                        *activeField_;
+                if (onFieldRow && hit.index >= 0 &&
+                    static_cast<std::size_t>(hit.index) <
+                        layout.items.size()) {
+                    // Left-press inside the focused row places the caret
+                    // at the clicked x (goal 4); a double-press selects
+                    // the whole buffer. The held drag then moves the caret
+                    // with the anchor fixed (MouseMoved below); releasing
+                    // anywhere keeps both selection and focus.
+                    const MenuRect& row =
+                        layout.items[static_cast<std::size_t>(hit.index)];
+                    const double inner = row.topLeft.x + 8.0;
+                    const double width = fieldAdvance_ *
+                                         static_cast<double>(
+                                             fieldText_.buffer.size());
+                    fieldDragLeft_ = inner;
+                    fieldDragWidth_ = width;
+                    fieldSelecting_ = true;
+                    if (doublePress) {
+                        fieldText_.anchor = 0;
+                        fieldText_.caret = fieldText_.buffer.size();
+                    } else {
+                        const std::size_t index = fieldIndexForFraction(
+                            clampUnit(width > 0.0
+                                          ? (position.x - inner) / width
+                                          : (position.x > inner ? 1.0 : 0.0)),
+                            fieldText_.buffer.size());
+                        fieldText_.caret = index;
+                        fieldText_.anchor = index;
+                    }
+                    continue;  // focus stays: no menu hit, no camera drag
+                }
+                const bool onFieldHeader =
+                    left && hit.kind == MenuHitKind::Header &&
+                    menuGroupOfField(*activeField_) == hit.group;
+                if (onFieldHeader) {
+                    continue;  // click on the field's header: focus stays
                 }
                 activeField_.reset();
-                fieldBuffer_.clear();
+                fieldText_ = {};
+                fieldSelecting_ = false;
             }
             if (press->button == sf::Mouse::Button::Left &&
                 hit.kind != MenuHitKind::None) {
@@ -613,6 +702,9 @@ void SimulationApp::handleEvents() {
         } else if (release != nullptr &&
                    release->button == sf::Mouse::Button::Left) {
             dragging_ = false;
+            // Ending a field drag anywhere keeps the editor focused and
+            // the selection it reached (press-based focus rules unchanged).
+            fieldSelecting_ = false;
         } else if (move != nullptr) {
             if (dragging_) {
                 camera_.panByPixels(
@@ -620,6 +712,18 @@ void SimulationApp::handleEvents() {
                                                    lastMouse_.x),
                                static_cast<double>(move->position.y -
                                                    lastMouse_.y)});
+            }
+            if (activeField_ && fieldSelecting_) {
+                // Drag-select: the caret follows the cursor's x while the
+                // anchor stays put; positions past the field's edges or
+                // off the row clamp to the buffer ends.
+                const double fraction =
+                    fieldDragWidth_ > 0.0
+                        ? (static_cast<double>(move->position.x) -
+                           fieldDragLeft_) / fieldDragWidth_
+                        : 0.0;
+                fieldText_.caret = fieldIndexForFraction(
+                    clampUnit(fraction), fieldText_.buffer.size());
             }
             lastMouse_ = move->position;
             // Tooltip target = header/row under the cursor, recomputed on
@@ -1003,31 +1107,72 @@ void SimulationApp::render() {
                 if (activeField_ &&
                     fieldForItem(*layout.openGroup, static_cast<int>(index),
                                  menuState_.preset) == *activeField_) {
-                    // Focused typed field (spec D.4) at the row rect:
-                    // accent outline + buffer + caret. The caret blinks on
-                    // the existing statsClock_ 0.5 s period (shown for its
+                    // Focused typed field (spec D.4 + Goal 4) at the row
+                    // rect: accent outline, selection band, buffer text,
+                    // and a 1 px accent caret AT the caret index (no more
+                    // end-of-buffer "|" glyph). The caret blinks on the
+                    // existing statsClock_ 0.5 s period (shown for its
                     // first half, hidden for its second).
+                    const double boxX = rect.topLeft.x + 2.0;
+                    const double boxY = rect.topLeft.y + 2.0;
+                    const double boxW = rect.size.x - 4.0;
+                    const double boxH = rect.size.y - 4.0;
+                    const double textLeft = rect.topLeft.x + 8.0;
                     sf::RectangleShape field{sf::Vector2f{
-                        static_cast<float>(rect.size.x - 4.0),
-                        static_cast<float>(rect.size.y - 4.0)}};
-                    field.setPosition(sf::Vector2f{
-                        static_cast<float>(rect.topLeft.x + 2.0),
-                        static_cast<float>(rect.topLeft.y + 2.0)});
+                        static_cast<float>(boxW), static_cast<float>(boxH)}};
+                    field.setPosition(sf::Vector2f{static_cast<float>(boxX),
+                                                   static_cast<float>(boxY)});
                     field.setFillColor(kMenuPanelColor);
                     field.setOutlineThickness(1.0F);
                     field.setOutlineColor(kMenuAccentColor);
                     window_.draw(field);
 
-                    const bool caretOn =
-                        statsClock_.getElapsedTime().asSeconds() < 0.25;
+                    if (fieldText_.hasSelection()) {
+                        // Band drawn BEFORE the text, clamped to the box.
+                        const auto clampX = [boxX, boxW](double x) {
+                            return std::min(std::max(x, boxX), boxX + boxW);
+                        };
+                        const double bandX0 = clampX(
+                            textLeft + fieldAdvance_ *
+                                           static_cast<double>(
+                                               fieldText_.selStart()));
+                        const double bandX1 = clampX(
+                            textLeft + fieldAdvance_ *
+                                           static_cast<double>(
+                                               fieldText_.selEnd()));
+                        if (bandX1 > bandX0) {
+                            sf::RectangleShape band{sf::Vector2f{
+                                static_cast<float>(bandX1 - bandX0),
+                                static_cast<float>(boxH)}};
+                            band.setPosition(
+                                sf::Vector2f{static_cast<float>(bandX0),
+                                            static_cast<float>(boxY)});
+                            band.setFillColor(kFieldSelectionColor);
+                            window_.draw(band);
+                        }
+                    }
+
                     sf::Text typed{*font_};
                     typed.setCharacterSize(13U);
                     typed.setFillColor(kHudColor);
-                    typed.setString(fieldBuffer_ + (caretOn ? "|" : " "));
+                    typed.setString(fieldText_.buffer);
                     typed.setPosition(sf::Vector2f{
                         static_cast<float>(rect.topLeft.x + 8.0),
                         static_cast<float>(rect.topLeft.y + 3.0)});
                     window_.draw(typed);
+
+                    if (statsClock_.getElapsedTime().asSeconds() < 0.25) {
+                        sf::RectangleShape caret{sf::Vector2f{
+                            1.0F, static_cast<float>(rect.size.y - 6.0)}};
+                        caret.setPosition(sf::Vector2f{
+                            static_cast<float>(
+                                textLeft + fieldAdvance_ *
+                                               static_cast<double>(
+                                                   fieldText_.caret)),
+                            static_cast<float>(rect.topLeft.y + 3.0)});
+                        caret.setFillColor(kMenuAccentColor);
+                        window_.draw(caret);
+                    }
                     continue;
                 }
 

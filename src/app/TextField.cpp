@@ -276,13 +276,6 @@ std::size_t fieldIndexForFraction(double fraction, std::size_t length) {
         std::llround(fraction * static_cast<double>(length)));
 }
 
-void fieldBackspace(TextField field, std::string& buffer) {
-    (void)field;
-    if (!buffer.empty()) {
-        buffer.pop_back();
-    }
-}
-
 std::string fieldSanitizePaste(TextField field, const std::string& pasted) {
     std::string out;
     for (const char ch : pasted) {
