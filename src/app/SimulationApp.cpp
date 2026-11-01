@@ -1184,7 +1184,11 @@ void SimulationApp::render() {
                 label.setFillColor(selected ? kHudColor : kMenuDimColor);
                 label.setString(item);
                 label.setPosition(sf::Vector2f{
-                    static_cast<float>(rect.topLeft.x + 30.0),
+                    static_cast<float>(
+                        rect.topLeft.x +
+                        menuRowTextIndent(*layout.openGroup,
+                                          static_cast<int>(index),
+                                          menuState_.preset)),
                     static_cast<float>(rect.topLeft.y + 3.0)});
                 window_.draw(label);
 
@@ -1194,7 +1198,8 @@ void SimulationApp::render() {
                     sf::CircleShape dot(3.0F, 24U);
                     dot.setFillColor(kMenuSelectColor);
                     dot.setPosition(sf::Vector2f{
-                        static_cast<float>(rect.topLeft.x + 10.0),
+                        static_cast<float>(rect.topLeft.x +
+                                           kMenuRowDotIndent),
                         static_cast<float>(rect.topLeft.y + rect.size.y /
                                                             2.0 -
                                                     3.0)});

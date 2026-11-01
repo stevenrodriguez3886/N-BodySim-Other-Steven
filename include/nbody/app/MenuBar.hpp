@@ -63,4 +63,14 @@ const char* menuPresetName(core::PresetName preset);
 // "Two-body", "Fig-8"); empty when the preset has no options.
 const char* menuOptionsHeaderLabel(core::PresetName preset);
 
+// Dropdown row indent law (spec builder call): rows that can carry a tick
+// dot (presets, integrator, dt, toggles) or hold a field readout keep
+// dot-at-10 / text-at-30; PLAIN rows (restart, roll buttons, separators)
+// indent 10. renderMenu draws every generic row label at
+// row.x + menuRowTextIndent(...) and every tick dot at row.x +
+// kMenuRowDotIndent, so layout and render share ONE source of truth.
+// (Focused field editors keep their Task 5 draw pass and do not use this.)
+inline constexpr double kMenuRowDotIndent = 10.0;
+double menuRowTextIndent(MenuGroup group, int index, core::PresetName preset);
+
 }  // namespace nbody::app

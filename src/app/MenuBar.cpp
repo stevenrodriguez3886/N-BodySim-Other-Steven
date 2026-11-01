@@ -153,6 +153,35 @@ const char* menuOptionsHeaderLabel(core::PresetName preset) {
     return "";
 }
 
+double menuRowTextIndent(MenuGroup group, int index, core::PresetName preset) {
+    // The ONE definition of the dropdown indent law (see MenuBar.hpp);
+    // renderMenu consumes it, so layout and render cannot drift.
+    constexpr double kPlainRowIndent = 10.0;
+    constexpr double kMarkedRowIndent = 30.0;  // dot-at-10 + text-at-30
+    if (index < 0 || index >= menuItemCount(group, preset)) {
+        return kPlainRowIndent;  // hidden / out-of-range rows are defined
+    }
+    switch (group) {
+        case MenuGroup::Simulation:
+            // 0-3 preset rows are dot-style; the separator (4) and the
+            // restart action (5) are plain.
+            return index < 4 ? kMarkedRowIndent : kPlainRowIndent;
+        case MenuGroup::Integrator:
+        case MenuGroup::Physics:
+            return kMarkedRowIndent;  // dot rows
+        case MenuGroup::Cloud:
+            // Field rows (even) keep the 30 px value indent; the roll
+            // buttons (odd) are plain action rows.
+            return (index % 2 == 0) ? kMarkedRowIndent : kPlainRowIndent;
+        case MenuGroup::Options:
+            // Field row + toggle row: both keep the value indent.
+            return kMarkedRowIndent;
+        case MenuGroup::Count_:
+            return kPlainRowIndent;
+    }
+    return kPlainRowIndent;
+}
+
 MenuLayout menuLayout(double winW, double winH,
                       std::optional<MenuGroup> openGroup,
                       core::PresetName preset) {

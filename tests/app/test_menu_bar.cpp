@@ -21,6 +21,7 @@ using nbody::app::menuLayout;
 using nbody::app::menuOptionsHeaderLabel;
 using nbody::app::menuPresetName;
 using nbody::app::menuPresetOptionCount;
+using nbody::app::menuRowTextIndent;
 using nbody::core::PresetName;
 
 namespace {
@@ -473,4 +474,162 @@ TEST_CASE("menu_hit_disabled_row") {
     REQUIRE(hit.kind == MenuHitKind::Item);
     REQUIRE(hit.group == MenuGroup::Simulation);
     REQUIRE(hit.index == 4);
+}
+
+// ---------------------------------------------------------------------------
+// Final-geometry laws (menu-bar rework task 6). These PIN the live-verified
+// width table {184,135,121,150,145} / x {10,202,345,474} / gap 8 by
+// asserting DERIVATION properties of the layout (chains, floors, slots),
+// never by hardcoding the table a second time.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Index of the group's own header in the layout (-1 when hidden). Headers
+// are never addressable by enum index, so every geometry law resolves the
+// slot through headerGroups, exactly like the hit test does.
+int headerSlot(const nbody::app::MenuLayout& layout, MenuGroup group) {
+    for (std::size_t index = 0; index < layout.headerGroups.size(); ++index) {
+        if (layout.headerGroups[index] == group) {
+            return static_cast<int>(index);
+        }
+    }
+    return -1;
+}
+
+}  // namespace
+
+TEST_CASE("geometry: adjacent visible headers keep exactly an 8 px gap") {
+    // x positions are derived (previous right edge + kHeaderGap) for BOTH
+    // last-slot variants (Cloud and Options) and every preset; assert the
+    // chain rather than the literal table.
+    for (PresetName preset : kAllPresets) {
+        const auto layout = menuLayout(800.0, 600.0, std::nullopt, preset);
+        REQUIRE(layout.headers.size() == 4);
+        CHECK(layout.headers[0].topLeft.x == 10.0);  // bar start inset
+        for (std::size_t index = 1; index < layout.headers.size(); ++index) {
+            const auto& prev = layout.headers[index - 1];
+            const auto& next = layout.headers[index];
+            INFO("preset=" << static_cast<int>(preset)
+                           << " header=" << index);
+            CHECK(next.topLeft.x - (prev.topLeft.x + prev.size.x) == 8.0);
+        }
+    }
+}
+
+TEST_CASE("geometry: header widths respect the 90 px floor") {
+    // Widths are content-sized (label + value extents + padding) but
+    // never below the min-width floor that stops tab jitter.
+    for (PresetName preset : kAllPresets) {
+        const auto layout = menuLayout(800.0, 600.0, std::nullopt, preset);
+        for (const auto& header : layout.headers) {
+            CHECK(header.size.x >= 90.0);
+        }
+    }
+}
+
+TEST_CASE("geometry: Options-last bar's right edge lands at 619") {
+    // Chain from the live widths: 10 + w0 + 8 + w1 + 8 + w2 + 8 + 145.
+    // 619 appears ONCE; the widths themselves are pinned by
+    // menu_header_geometry, so this is a derivation property, not a
+    // second copy of the table.
+    for (PresetName preset : {PresetName::TwoBody,
+                              PresetName::SolarSystem,
+                              PresetName::FigureEight}) {
+        const auto layout = menuLayout(800.0, 600.0, std::nullopt, preset);
+        REQUIRE(layout.headerGroups[3] == MenuGroup::Options);
+        double right = layout.headers[0].topLeft.x;
+        for (std::size_t index = 0; index < 4; ++index) {
+            right += layout.headers[index].size.x;
+            if (index + 1 < 4) {
+                right += 8.0;
+            }
+        }
+        CHECK(right ==
+              layout.headers[3].topLeft.x + layout.headers[3].size.x);
+        CHECK(right == 619.0);
+    }
+}
+
+TEST_CASE("geometry: dropdown panels track their slot and floor at 140") {
+    // Every visible dropdown: x = owning header's x, width =
+    // max(header width, 140) -- including the Options group.
+    for (PresetName preset : kAllPresets) {
+        for (MenuGroup group : kAllGroups) {
+            if (!menuGroupVisible(group, preset)) {
+                continue;
+            }
+            const auto layout = menuLayout(800.0, 600.0, group, preset);
+            REQUIRE(layout.openGroup == group);
+            REQUIRE_FALSE(layout.items.empty());
+            const int slot = headerSlot(layout, group);
+            REQUIRE(slot >= 0);
+            const auto& header =
+                layout.headers[static_cast<std::size_t>(slot)];
+            const double expected =
+                header.size.x > 140.0 ? header.size.x : 140.0;
+            for (const auto& item : layout.items) {
+                INFO("preset=" << static_cast<int>(preset)
+                               << " group=" << static_cast<int>(group));
+                CHECK(item.topLeft.x == header.topLeft.x);
+                CHECK(item.size.x == expected);
+                CHECK(item.size.x >= 140.0);
+            }
+        }
+    }
+}
+
+TEST_CASE("geometry: cloud-visible layout leaves no blank Options slot") {
+    // Hidden-group law with the LAST slot taken by Cloud: the bar stays
+    // 4 headers, the chain stays 8-gap, and there is no placeholder gap
+    // where the hidden Options header would have been.
+    const auto layout = menuLayout(800.0, 600.0, std::nullopt,
+                                   PresetName::RandomCloud);
+    REQUIRE(layout.headers.size() == 4);
+    CHECK_FALSE(contains(layout.headerGroups, MenuGroup::Options));
+    CHECK(layout.headerGroups[3] == MenuGroup::Cloud);
+    for (std::size_t index = 1; index < layout.headers.size(); ++index) {
+        const auto& prev = layout.headers[index - 1];
+        const auto& next = layout.headers[index];
+        CHECK(next.topLeft.x - (prev.topLeft.x + prev.size.x) == 8.0);
+    }
+    // The last slot starts exactly where the chain says -- a blank slot
+    // would push it 8 + 145 px right.
+    CHECK(layout.headers[3].topLeft.x ==
+          layout.headers[2].topLeft.x + layout.headers[2].size.x + 8.0);
+    // And it hits Cloud, never a phantom Options header.
+    const auto hit = menuHitTest(layout, {480.0, 20.0});
+    REQUIRE(hit.kind == MenuHitKind::Header);
+    REQUIRE(hit.group == MenuGroup::Cloud);
+}
+
+TEST_CASE("geometry: dropdown row indent laws 10/30") {
+    // Pin the pure side of the indent law (spec builder call): rows that
+    // can carry a tick dot or hold a value/toggle keep dot-at-10 and
+    // text-at-30; PLAIN action rows (restart, cloud roll buttons) and the
+    // separator indent 10. renderMenu positions every generic label via
+    // menuRowTextIndent, so the render path cannot drift from this.
+    // (Focused field editors draw through the Task 5 pass and are out of
+    // scope here.)
+    CHECK(nbody::app::kMenuRowDotIndent == 10.0);
+    for (PresetName preset : kAllPresets) {
+        for (MenuGroup group : kAllGroups) {
+            const int count = menuItemCount(group, preset);
+            for (int row = 0; row < count; ++row) {
+                const bool plain =
+                    (group == MenuGroup::Simulation && row >= 4) ||
+                    (group == MenuGroup::Cloud && (row == 1 || row == 3));
+                const double want = plain ? 10.0 : 30.0;
+                INFO("preset=" << static_cast<int>(preset)
+                               << " group=" << static_cast<int>(group)
+                               << " row=" << row);
+                CHECK(menuRowTextIndent(group, row, preset) == want);
+            }
+        }
+    }
+    // Out-of-range / hidden rows are defined, not garbage.
+    CHECK(menuRowTextIndent(MenuGroup::Simulation, 9,
+                            PresetName::TwoBody) == 10.0);
+    CHECK(menuRowTextIndent(MenuGroup::Cloud, 0,
+                            PresetName::TwoBody) == 10.0);
 }
