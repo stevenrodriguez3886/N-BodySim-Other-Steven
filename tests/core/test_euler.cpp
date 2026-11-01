@@ -1,3 +1,8 @@
+/// @file
+/// Tests for the explicit (forward) Euler integrator: exact straight-line
+/// motion for a free particle, the explicit-versus-semi-implicit update
+/// ordering, and the energy gain that the sim demos against RK4.
+
 #include <cmath>
 #include <vector>
 
@@ -15,8 +20,12 @@ using Catch::Approx;
 
 namespace {
 
-// Total energy of the system: E = sum 1/2 m v^2 - sum_{i<j} G m_i m_j /
-// sqrt(d^2 + eps^2), matching the sim's softened-potential convention.
+/// @brief Total energy of the system under the sim's softened-potential
+/// convention: E = sum 1/2 m v^2 - sum_{i<j} G m_i m_j / sqrt(d^2 + eps^2).
+/// @param bodies Bodies whose kinetic and pairwise potential energy is summed.
+/// @param g Gravitational constant.
+/// @param eps Softening length used in the pairwise potential.
+/// @return The total mechanical energy of the system.
 double totalEnergy(const std::vector<Body>& bodies, double g, double eps) {
     double e = 0.0;
     for (const Body& b : bodies) {
@@ -35,9 +44,10 @@ double totalEnergy(const std::vector<Body>& bodies, double g, double eps) {
 
 }  // namespace
 
+/// @brief With one isolated body there is no gravitational acceleration, so
+/// explicit Euler must reproduce the straight-line trajectory exactly.
 TEST_CASE("euler_free_particle_straight_line") {
-    // One isolated body: gravity contributes zero acceleration, so explicit
-    // Euler must reproduce the straight-line trajectory exactly.
+    // Velocity stays constant and position advances as p += v * dt per step.
     EulerIntegrator euler;
     CHECK(euler.name() == "euler");
 
@@ -54,11 +64,11 @@ TEST_CASE("euler_free_particle_straight_line") {
     CHECK(bodies[0].velocity.y == Approx(0.5).epsilon(1e-12));
 }
 
+/// @brief Pins the explicit (not semi-implicit) update ordering: position
+/// uses the OLD velocity and acceleration is evaluated at the OLD positions.
+/// A semi-implicit step would update v first and move p.y with the modified
+/// velocity, which this check rejects.
 TEST_CASE("euler_explicit_order_check") {
-    // Pins explicit (not semi-implicit) ordering per plan section C.2:
-    // position uses the OLD velocity; acceleration is evaluated at the OLD
-    // positions. A semi-implicit step would update v first and move p.y with
-    // the modified velocity, which this check rejects.
     const double dt = 0.01;
     std::vector<Body> bodies = {
         Body{1, 100.0, 0.1, Vec2{0.0, 0.0}, Vec2{0.0, 0.0}},  // heavy, fixed-ish
@@ -78,13 +88,13 @@ TEST_CASE("euler_explicit_order_check") {
     CHECK(light.velocity.x == 100.0 * (-1.0) * dt);
 }
 
+/// @brief Documentation test for the sim's Euler-versus-RK4 demo: the
+/// two-body circular setup (m = 1 at (+-1, 0), v = (0, +-0.5), G = 1,
+/// eps = 0; radii are irrelevant here) under 40000 explicit-Euler steps.
+/// Explicit Euler is known to GAIN energy (the orbit spirals out), so this
+/// records the drift and asserts the documented instability rather than a
+/// tight conservation bound.
 TEST_CASE("euler_energy_drift_euler") {
-    // Documentation test for the spec's Euler-vs-RK4 demo: the two-body
-    // circular preset (plan C.5: m=1 at (+-1, 0), v = (0, +-0.5), G=1,
-    // eps=0; radii are irrelevant here) under 40000 explicit-Euler steps.
-    // Explicit Euler is known to GAIN energy (orbit spirals out); we record
-    // the drift and assert the documented instability rather than a tight
-    // conservation bound.
     const double g = 1.0;
     const double eps = 0.0;
     const double dt = 1.0 / 120.0;  // the sim's fixed time step

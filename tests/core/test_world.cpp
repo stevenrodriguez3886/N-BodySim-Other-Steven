@@ -1,3 +1,9 @@
+/// @file
+/// Tests for PhysicsWorld: collision-merge laws (mass, momentum, position,
+/// radius, appearance carry-over, chain termination), monotonic body-id
+/// issuance, step/time bookkeeping, and the runtime setters for integrator,
+/// time step, and gravity.
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -21,9 +27,11 @@ using Catch::Approx;
 
 namespace {
 
-// WorldConfig with an effectively inert gravity field: a huge softening makes
-// every pairwise acceleration ~G*m/eps^2 -> negligible, so a single step()
-// isolates the merge math from any gravitational displacement.
+/// @brief A WorldConfig with an effectively inert gravity field: a huge
+/// softening makes every pairwise acceleration ~G*m/eps^2 negligible, so a
+/// single step() isolates the merge math from gravitational displacement.
+/// @param dt Time step for the config (defaults to the sim's 1/120).
+/// @return A WorldConfig whose gravity is physically negligible.
 WorldConfig inertConfig(double dt = 1.0 / 120.0) {
     WorldConfig cfg;
     cfg.g = 1.0;
@@ -34,6 +42,8 @@ WorldConfig inertConfig(double dt = 1.0 / 120.0) {
 
 }  // namespace
 
+/// @brief Overlapping bodies merge into the heavier one: the survivor carries
+/// the combined mass and exactly the initial total momentum.
 TEST_CASE("world_merge_conserves_mass_momentum") {
     // m1=2, v=(1,0); m2=1, v=(0,1). One step must leave exactly one body of
     // mass 3 carrying the exact initial total momentum (2, 1).
@@ -58,6 +68,9 @@ TEST_CASE("world_merge_conserves_mass_momentum") {
     CHECK(survivor.mass * survivor.velocity.y == Approx(p0.y).margin(1e-12));
 }
 
+/// @brief The merged body's position is the momentum-weighted center of mass
+/// and its radius the quadrature sum sqrt(r1^2 + r2^2), preserving total
+/// cross-sectional area.
 TEST_CASE("world_merge_position_radius") {
     // Overlapping (d=0.4 < r1+r2=0.8) pair at dt=0: survivor position must be
     // the momentum-weighted center of mass, radius sqrt(r1^2+r2^2).
@@ -77,6 +90,8 @@ TEST_CASE("world_merge_position_radius") {
     CHECK(survivor.radius == Approx(std::sqrt(0.5 * 0.5 + 0.3 * 0.3)).margin(1e-9));
 }
 
+/// @brief Merging is appearance-inert: the survivor keeps its own appearance
+/// fields untouched and none of the loser's values leak into it.
 TEST_CASE("world_merge_keeps_survivor_appearance") {
     // Appearance is physics-inert: the merge must neither read nor rewrite it.
     // The survivor (larger mass) carries its own appearance; the loser's is
@@ -108,6 +123,9 @@ TEST_CASE("world_merge_keeps_survivor_appearance") {
     CHECK(survivor.appearance.bands != 1);
 }
 
+/// @brief A cascade of coincident bodies collapses to a single survivor with
+/// one recorded merge per pair consumed, without hanging the scan-restart
+/// loop.
 TEST_CASE("world_chain_merge_terminates") {
     // Three coincident bodies: the scan-restart loop must terminate with one
     // survivor (id 2, the largest mass) and exactly 2 recorded merges.
@@ -126,6 +144,8 @@ TEST_CASE("world_chain_merge_terminates") {
     CHECK(world.mergeCount() == 2);
 }
 
+/// @brief The chain merge also terminates under RK4, additionally exercising
+/// the RK4 scratch-buffer resize-on-shrink path.
 TEST_CASE("world_chain_merge_terminates_rk4") {
     // Same chain merge under RK4: additionally exercises the RK4 scratch
     // resize-on-shrink path (4 bodies -> 1 between steps).
@@ -145,6 +165,9 @@ TEST_CASE("world_chain_merge_terminates_rk4") {
     CHECK(world.mergeCount() == 3);
 }
 
+/// @brief Body ids are monotonically increasing across resets: survivors
+/// keep their already-issued id and id==0 arrivals always get ids above every
+/// id ever handed out.
 TEST_CASE("world_ids_never_reused") {
     // ids are monotonic across resets: nextId_ never rewinds, and bodies
     // arriving with id==0 get ids above everything ever issued.
@@ -187,6 +210,8 @@ TEST_CASE("world_ids_never_reused") {
     CHECK(world.bodies()[0].id > 42);  // monotonic even past a preset's explicit ids
 }
 
+/// @brief Each step() advances the step counter and simulation time by the
+/// configured dt; reset() rewinds both to zero.
 TEST_CASE("world_step_advances_time") {
     PhysicsWorld world{inertConfig(0.25), std::make_unique<EulerIntegrator>()};
     world.reset({Body{1, 1.0, 0.1, Vec2{0.0, 0.0}, Vec2{0.0, 0.0}}});
@@ -205,10 +230,12 @@ TEST_CASE("world_step_advances_time") {
     CHECK(world.simulationTime() == Approx(0.0).margin(0.0));
 }
 
+/// @brief A stable circular two-body orbit with small radii never triggers a
+/// merge: over 5000 steps the separation stays near its initial value and the
+/// body count stays 2 with zero merges.
 TEST_CASE("world_no_collision_stable_pair") {
-    // Exact circular two-body orbit (plan C.5 two-body preset geometry) with
-    // radii 0.05: separation stays ~2 across 5000 steps, so the body count
-    // must remain 2 with zero merges. Euler (cheaper) per instructions.
+    // Two-body preset geometry with radii 0.05 (<< half the separation), so
+    // the pair cannot touch. Euler (the cheaper integrator) suffices.
     WorldConfig cfg;
     cfg.g = 1.0;
     cfg.softening = 0.0;  // preset value: no softening
@@ -227,6 +254,9 @@ TEST_CASE("world_no_collision_stable_pair") {
     CHECK(world.totalSteps() == 5000);
 }
 
+/// @brief Swapping the integrator mid-flight takes effect on the very next
+/// step (here: Euler's position-first update law) without altering the body
+/// count.
 TEST_CASE("world_set_integrator_swaps_midflight") {
     WorldConfig cfg;
     cfg.g = 1.0;
@@ -257,6 +287,7 @@ TEST_CASE("world_set_integrator_swaps_midflight") {
     }
 }
 
+/// @brief setTimeStep changes how far a single step advances simulation time.
 TEST_CASE("world_set_timestep_changes_advance") {
     PhysicsWorld world{inertConfig(), std::make_unique<EulerIntegrator>()};
     world.reset({Body{1, 1.0, 0.1, Vec2{0.0, 0.0}, Vec2{0.0, 0.0}}});
@@ -268,6 +299,8 @@ TEST_CASE("world_set_timestep_changes_advance") {
     CHECK(world.timeStep() == Approx(1.0 / 60.0).margin(0.0));
 }
 
+/// @brief setGravity scales the gravitational impulse proportionally: with
+/// g = 4 the per-step velocity change is exactly 4x the g = 1 change.
 TEST_CASE("world_set_gravity_changes_force") {
     WorldConfig cfg;
     cfg.g = 1.0;

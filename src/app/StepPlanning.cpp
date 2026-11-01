@@ -1,3 +1,8 @@
+/// @file
+/// The accumulator update behind the fixed-timestep frame loop. The
+/// clamp/cap constants and their contracts live with the declarations in
+/// StepPlanning.hpp.
+
 #include "nbody/app/StepPlanning.hpp"
 
 #include <algorithm>
@@ -5,9 +10,9 @@
 namespace nbody::app {
 
 StepPlan planSteps(double accumulator, double frameTime, double dt) {
-    // Constants live in the header verbatim: kMaxFrameTime (0.25 s) clamps a
-    // huge frame delta (tab switch, first frame), kMaxStepsFrame (30) caps
-    // the catch-up burst; on cap the leftover accumulator is dropped.
+    // kMaxFrameTime (0.25 s) clamps a huge frame delta (tab switch, first
+    // frame); kMaxStepsFrame (30) caps the catch-up burst, and on cap the
+    // leftover accumulator is dropped rather than replayed later.
     const double clamped = std::min(frameTime, kMaxFrameTime);
     double acc = accumulator + clamped;
     int steps = 0;

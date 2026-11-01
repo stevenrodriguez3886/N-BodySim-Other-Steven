@@ -1,3 +1,9 @@
+/// @file
+/// Unit tests for the 2D vector type Vec2: every free operator and helper
+/// (add, subtract, scale, divide, negate, compound assignment, dot, length)
+/// plus sane defaults for Body. The chosen values are exact in binary
+/// floating point, so most assertions are == rather than approximations.
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -12,6 +18,9 @@ static_assert(lengthSq(Vec2{3.0, 4.0}) == 25.0);
 static_assert((Vec2{1.0, 2.0} + Vec2{3.0, 4.0}).x == 4.0);
 static_assert((2.0 * Vec2{1.0, 2.0}).y == 4.0);
 
+/// @brief Exercises every Vec2 operation on small exactly-representable
+/// values, checking each component of the result against hand-computed
+/// arithmetic.
 TEST_CASE("vec_operators") {
     const Vec2 a{1.0, 2.0};
     const Vec2 b{3.0, 4.0};
@@ -76,6 +85,8 @@ TEST_CASE("vec_operators") {
     }
 }
 
+/// @brief A value-initialized Body carries a zero id and strictly positive
+/// mass and radius, so downstream physics never divides by or scales by zero.
 TEST_CASE("body_defaults") {
     const Body body{};
     CHECK(body.id == 0U);

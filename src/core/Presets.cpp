@@ -1,3 +1,8 @@
+/// @file
+/// Concrete initial conditions for the four presets. Every constant here is
+/// load-bearing: presets are regression anchors (bitwise reproducible from
+/// seed), and tests pin orbits, energies, and stream stability against them.
+
 #include "nbody/core/Presets.hpp"
 
 #include <cmath>
@@ -11,15 +16,22 @@
 namespace nbody::core {
 namespace {
 
-// Radius convention from plan C.5: r = k * sqrt(m), with k per preset.
+/// @brief Radius convention: r = k * sqrt(mass), with a scale factor k per
+/// preset (area grows with mass; k sets how big bodies look on screen).
+/// @param mass The body's mass.
+/// @param k The preset's radius scale factor.
+/// @return The collision/visual radius in world units.
 double radiusFor(double mass, double k) {
     return k * std::sqrt(mass);
 }
 
-// Splitmix64 finalizer (Steele et al.) over the two's-complement bits of the
-// int64 seed; high 32 bits returned as the mt19937 seed. Only reached for
-// seeds OUTSIDE [0, 2^32) — small non-negative seeds pass through unchanged
-// (see foldSeed), which is what keeps every historical stream intact.
+/// @brief Splitmix64 finalizer (Steele et al.) over the two's-complement
+/// bits of the int64 seed; the high 32 bits become the mt19937 seed. Only
+/// reached for seeds OUTSIDE [0, 2^32) — small non-negative seeds pass
+/// through unchanged (see foldSeed), which keeps every historical stream
+/// intact.
+/// @param seed The out-of-window signed seed to fold.
+/// @return The folded u32 seed for std::mt19937.
 std::uint32_t splitmix64Fold(std::int64_t seed) {
     std::uint64_t z = static_cast<std::uint64_t>(seed);
     z += UINT64_C(0x9E3779B97F4A7C15);
@@ -40,10 +52,10 @@ std::uint32_t foldSeed(std::int64_t seed) {
 }
 
 // G=1, eps=0; m=1 at (+-s, 0), v=(0, +-0.5/sqrt(s)) with s = separation/10:
-// s=1 (default separation 10) is today's exact circular orbit (r_orbit=1,
-// v_rel=1, period T = 4*pi); larger s is the same orbit scaled (circular
-// speed sqrt(G*m/(4s)) follows from the two-body scaling law). hyperbolic =
-// same geometry, |v| = 1.6x circular: unbound (1.6^2 > 2).
+// at the default separation 10 (s=1) this is the exact circular orbit
+// (r_orbit=1, v_rel=1, period T = 4*pi); larger s is the same orbit scaled
+// (circular speed sqrt(G*m/(4s)) follows from the two-body scaling law).
+// hyperbolic = same geometry, |v| = 1.6x circular: unbound (1.6^2 > 2).
 SimulationSetup twoBody(std::int64_t /*seed*/, double separation,
                         bool hyperbolic) {
     const double s = separation / 10.0;
@@ -59,17 +71,17 @@ SimulationSetup twoBody(std::int64_t /*seed*/, double separation,
         cfg};
 }
 
-// OUR solar system (spec D.2): sun m=500 at rest at origin + 8 planets
+// A stylized solar system: sun m=500 at rest at the origin + 8 planets
 // (Mercury..Neptune) on circular orbits, tangential v = sqrt(G*M_sun/a),
 // start angles from a fixed literal list — NO RNG, the preset ignores the
 // seed. Radii a = 6*(1, 1.55, 2.05, 2.6, 3.9, 5.0, 6.4, 7.7): a sqrt-style
 // compression of real AU, order preserved. Masses 1e-4..8e-3 (Jupiter
 // heaviest, every planet <= 1e-2 * sun so orbits stay clean). Collision
 // radii stay k=0.05 (tiny): no merges at these spacings. The sun's stored
-// radius is NOT visually capped (draw-time floors are Task 2's job).
-// Rocky-planet masses are floored into the spec band (real ratios would put
-// them ~3 orders of magnitude below it); ordering follows reality.
-// planetCount (spec D.2/D.3) is an inside-out prefix of the table, clamped
+// radius is not visually capped (the renderer applies draw-time floors).
+// Rocky-planet masses are floored into the 1e-4..8e-3 band (real ratios
+// would put them ~3 orders of magnitude below it); ordering follows reality.
+// planetCount is an inside-out prefix of the table, clamped
 // [0, 8]; pluto adds body id 10 (a ~= 200, circular, prograde like the
 // siblings) only when the CLAMPED count == 8, else it is ignored.
 SimulationSetup solarSystem(std::int64_t /*seed*/, int planetCount,
@@ -113,7 +125,7 @@ SimulationSetup solarSystem(std::int64_t /*seed*/, int planetCount,
     Body sun{1, kSunMass, radiusFor(kSunMass, 0.05), Vec2{0.0, 0.0},
             Vec2{0.0, 0.0}};
     sun.appearance.color = 0xFFD75Eu;
-    sun.appearance.glow = true;  // star-style glow (renderer, Task 2)
+    sun.appearance.glow = true;  // star-style glow, honored by the renderer
     bodies.push_back(sun);
 
     std::uint64_t id = 2;
@@ -130,7 +142,7 @@ SimulationSetup solarSystem(std::int64_t /*seed*/, int planetCount,
         bodies.push_back(body);
     }
     if (addPluto) {
-        // Spec D.2: Pluto at a ~= 200, circular v = sqrt(G*M_sun/a), prograde
+        // Pluto at a ~= 200, circular v = sqrt(G*M_sun/a), prograde
         // (2D: no inclination), dim brown, mass ~1e-5, k=0.05 radius law.
         constexpr double kPlutoA = 200.0;
         constexpr double kPlutoMass = 1.0e-5;
@@ -143,13 +155,13 @@ SimulationSetup solarSystem(std::int64_t /*seed*/, int planetCount,
     return SimulationSetup{std::move(bodies), cfg};
 }
 
-// Gaussian cloud, fully seeded (plan C.5): positions ~ N(0, 6) per axis
+// Gaussian cloud, fully seeded: positions ~ N(0, 6) per axis
 // (isotropic => disc), velocities ~ N(0, 0.2), mass ~ U[0.1, 1.0], k=0.08.
 // The per-body sampling ORDER below (px, py, vx, vy, m) is part of the
 // seeded-determinism contract: never reshuffle it. It also gives the prefix
-// contract (spec D.3): body i consumes the stream identically for any total
+// contract: body i consumes the stream identically for any total
 // count, so the first N of (seed, M) are bitwise all of (seed, N).
-// count clamps to [2, 2000] (spec D.3); the seed reaches mt19937 through
+// count clamps to [2, 2000]; the seed reaches mt19937 through
 // foldSeed, so historical <2^32 streams are unchanged.
 SimulationSetup randomCloud(std::int64_t seed, std::uint32_t count) {
     WorldConfig cfg;
@@ -183,17 +195,16 @@ SimulationSetup randomCloud(std::int64_t seed, std::uint32_t count) {
 }
 
 // Chenciner-Montgomery figure-eight, G=1, eps=0, period T ~ 6.32591398.
-// The figure-eight velocity block below deviates from plan C.5 (whose literal
-// v-block carries net angular momentum L ~ 0.839 with these positions); the
-// shipped L=0 mirrored variant is the published Chenciner-Montgomery
-// choreography — see the plan erratum note (2026-10-29).
-// k=0.1 is free per C.5 (equal masses) and keeps the merge threshold (0.2) a
-// factor 3.4 below the orbit's minimum pairwise separation (0.690, measured,
+// The velocity block below is the published L=0 mirrored choreography; the
+// naive v-block paired with these positions carries net angular momentum
+// L ~ 0.839 and would not stay on the figure-eight.
+// k=0.1 (free for equal masses) keeps the merge threshold (0.2) a factor
+// 3.4 below the orbit's minimum pairwise separation (0.690, measured,
 // dt-converged) — the choreography must never merge.
 // scale: positions xk, velocities /sqrt(k) — the Keplerian self-similarity
 // of Newtonian gravity with G fixed (a scaled copy traverses the same shape
-// on a time axis xk^1.5). The x sqrt(k) of spec D.2's literal is a merely
-// positional scaling and drifts/unbinds for k != 1. 1.0 = today, bitwise
+// on a time axis xk^1.5). A merely positional x sqrt(k) scaling drifts and
+// unbinds for k != 1. At k = 1.0 the scaling is bitwise identity
 // (sqrt(1.0) == 1.0 and division by 1.0 is exact).
 SimulationSetup figureEight(std::int64_t /*seed*/, double scale) {
     const double vk = std::sqrt(scale);

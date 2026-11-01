@@ -1,3 +1,7 @@
+/// @file test_menu_bar.cpp
+/// @brief Menu-bar layout and hit-test tests: header geometry, dropdown
+/// placement, separator rows, labels, tooltips, and the derived geometry
+/// laws that pin the on-screen layout.
 #include "nbody/app/MenuBar.hpp"
 #include "nbody/app/MenuModel.hpp"
 
@@ -34,6 +38,8 @@ constexpr PresetName kAllPresets[] = {
     PresetName::TwoBody, PresetName::SolarSystem, PresetName::RandomCloud,
     PresetName::FigureEight};
 
+/// @brief Linear search for a value in a vector.
+/// @return True when the vector holds the given value.
 template <typename T>
 bool contains(const std::vector<T>& values, T value) {
     for (const T& item : values) {
@@ -52,9 +58,10 @@ constexpr double kHeaderXs[] = {10.0, 202.0, 345.0, 474.0};
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// New-layout structure tests (menu-bar rework task 1).
+// Layout-structure tests.
 // ---------------------------------------------------------------------------
 
+/// @brief The Options group shows exactly when Cloud hides.
 TEST_CASE("group visibility: Options is the complement of Cloud") {
     for (auto p : kAllPresets) {
         CHECK(menuGroupVisible(MenuGroup::Options, p) ==
@@ -64,12 +71,14 @@ TEST_CASE("group visibility: Options is the complement of Cloud") {
     }
 }
 
+/// @brief The Simulation dropdown always holds six rows.
 TEST_CASE("Simulation menu is presets+separator+restart for every preset") {
     for (auto p : kAllPresets) {
         CHECK(menuItemCount(MenuGroup::Simulation, p) == 6);
     }
 }
 
+/// @brief The Options row count follows the preset's option count.
 TEST_CASE("Options item counts follow the preset") {
     CHECK(menuItemCount(MenuGroup::Options, PresetName::TwoBody) == 2);
     CHECK(menuItemCount(MenuGroup::Options, PresetName::SolarSystem) == 2);
@@ -77,6 +86,7 @@ TEST_CASE("Options item counts follow the preset") {
     CHECK(menuItemCount(MenuGroup::Options, PresetName::RandomCloud) == 0);
 }
 
+/// @brief Exactly four headers; Cloud and Options never both show.
 TEST_CASE("layout: only one of Cloud/Options heads the last slot, never a "
           "6th header") {
     for (auto p : kAllPresets) {
@@ -90,6 +100,7 @@ TEST_CASE("layout: only one of Cloud/Options heads the last slot, never a "
     }
 }
 
+/// @brief Header x-positions are identical across all presets.
 TEST_CASE("layout: no tab jumps when the preset changes") {
     // Same header x-positions across presets: Options and Cloud occupy
     // the same last slot.
@@ -109,6 +120,7 @@ TEST_CASE("layout: no tab jumps when the preset changes") {
     }
 }
 
+/// @brief The Simulation separator sits at row 4; Options has none.
 TEST_CASE("Simulation separator row is index 4 only") {
     auto layout = menuLayout(800, 600, MenuGroup::Simulation,
                              PresetName::SolarSystem);
@@ -118,6 +130,7 @@ TEST_CASE("Simulation separator row is index 4 only") {
     CHECK(opts.disabledRows.empty());  // Options dropdown: zero separators
 }
 
+/// @brief The Options header is named after the current preset.
 TEST_CASE("Options header label follows the preset") {
     CHECK(menuOptionsHeaderLabel(PresetName::SolarSystem) ==
           std::string("Solar"));
@@ -130,6 +143,8 @@ TEST_CASE("Options header label follows the preset") {
     CHECK(menuGroupLabel(MenuGroup::Options) == std::string("Options"));
 }
 
+/// @brief The open Options dropdown lands in the last header slot; a
+/// stale open group on a hidden preset exposes nothing.
 TEST_CASE("menu_options_open_layout") {
     const auto layout = menuLayout(800.0, 600.0, MenuGroup::Options,
                                    PresetName::SolarSystem);
@@ -150,9 +165,10 @@ TEST_CASE("menu_options_open_layout") {
 }
 
 // ---------------------------------------------------------------------------
-// Pre-existing geometry/hit tests, rewritten for the new layout.
+// Geometry and hit tests.
 // ---------------------------------------------------------------------------
 
+/// @brief The full header geometry table, for every preset.
 TEST_CASE("menu_header_geometry") {
     // Every preset lays out exactly four headers: Simulation, Integrator,
     // Physics plus ONE last-slot header (Cloud while random-cloud is
@@ -183,6 +199,7 @@ TEST_CASE("menu_header_geometry") {
     }
 }
 
+/// @brief Headers and dropdown items hit their own rects, never the gaps.
 TEST_CASE("menu_hit_header_and_item") {
     const auto layout = menuLayout(800.0, 600.0, MenuGroup::Physics,
                                    PresetName::TwoBody);
@@ -220,6 +237,7 @@ TEST_CASE("menu_hit_header_and_item") {
     REQUIRE(outsideItemHit.kind == MenuHitKind::None);
 }
 
+/// @brief A closed menu exposes no dropdown items.
 TEST_CASE("menu_closed_layout_has_no_items") {
     const auto layout = menuLayout(800.0, 600.0, std::nullopt,
                                    PresetName::RandomCloud);
@@ -228,6 +246,7 @@ TEST_CASE("menu_closed_layout_has_no_items") {
     REQUIRE(layout.disabledRows.empty());
 }
 
+/// @brief A narrow window still lays out all four headers (clipped).
 TEST_CASE("menu_narrow_window_clips_headers") {
     const auto layout = menuLayout(300.0, 600.0, std::nullopt,
                                    PresetName::RandomCloud);
@@ -235,6 +254,7 @@ TEST_CASE("menu_narrow_window_clips_headers") {
     REQUIRE(layout.headers[3].topLeft.x + layout.headers[3].size.x > 300.0);
 }
 
+/// @brief A short window flips the dropdown rows upward under the bar.
 TEST_CASE("menu_short_window_flips_items_upward") {
     const auto layout = menuLayout(800.0, 140.0, MenuGroup::Physics,
                                    PresetName::TwoBody);
@@ -253,6 +273,7 @@ TEST_CASE("menu_short_window_flips_items_upward") {
     REQUIRE(lastItem.topLeft.y + lastItem.size.y == flippedBottom);
 }
 
+/// @brief Group labels and the preset-aware pure item counts.
 TEST_CASE("menu_group_labels_and_pure_counts") {
     REQUIRE(menuGroupLabel(MenuGroup::Simulation) == std::string("Simulation"));
     REQUIRE(menuGroupLabel(MenuGroup::Integrator) == std::string("Integrator"));
@@ -276,6 +297,8 @@ TEST_CASE("menu_group_labels_and_pure_counts") {
     REQUIRE(menuItemLabel(MenuState{}, MenuGroup::Integrator, 1) == "euler");
 }
 
+/// @brief A hidden Cloud group never exposes headers or rows; Options
+/// takes the last slot instead.
 TEST_CASE("menu_cloud_hidden_layout_and_hit") {
     MenuState state;  // preset two-body: the Cloud group is hidden.
     const auto hidden = menuLayout(800.0, 600.0, MenuGroup::Cloud,
@@ -308,6 +331,7 @@ TEST_CASE("menu_cloud_hidden_layout_and_hit") {
     REQUIRE(rowHit.index == 0);
 }
 
+/// @brief Simulation layout rows and separators agree with the pure counts.
 TEST_CASE("menu_simulation_layout_rows_and_separators") {
     // Layout item counts must agree with menuItemCount for every preset,
     // with the single separator at row 4 (options rows left Simulation).
@@ -333,11 +357,12 @@ TEST_CASE("menu_simulation_layout_rows_and_separators") {
     }
 }
 
+/// @brief Simulation labels are preset names, separator, and restart.
 TEST_CASE("menu_simulation_labels_are_state_aware") {
     // Simulation rows are 0-3 presets, 4 separator, 5 restart for every
     // preset. The option-row labels ("separation: ...", "planets: ...",
-    // toggles) now live in the Options group; their state-aware mapping
-    // is owned by the MenuModel tests (task 2 of the rework).
+    // toggles) live in the Options group; their state-aware mapping is
+    // owned by the MenuModel tests.
     for (PresetName preset : kAllPresets) {
         MenuState state;
         state.preset = preset;
@@ -353,6 +378,7 @@ TEST_CASE("menu_simulation_labels_are_state_aware") {
     }
 }
 
+/// @brief Cloud rows: seed field, roll buttons, and the bodies counter.
 TEST_CASE("menu_cloud_group_rows") {
     MenuState state;
     state.preset = PresetName::RandomCloud;
@@ -365,7 +391,7 @@ TEST_CASE("menu_cloud_group_rows") {
     REQUIRE(menuItemLabel(state, MenuGroup::Cloud, 2) == "bodies: 300");
     REQUIRE(menuItemLabel(state, MenuGroup::Cloud, 4).empty());
 
-    // The seed field keeps its row-0 hit semantics from the old Seed group.
+    // The seed field keeps its row-0 hit semantics.
     const auto closed = menuLayout(800.0, 600.0, std::nullopt,
                                    PresetName::RandomCloud);
     const auto& cloudHeader = closed.headers[3];
@@ -377,12 +403,13 @@ TEST_CASE("menu_cloud_group_rows") {
     REQUIRE(headerHit.index == -1);
 }
 
+/// @brief Every header carries its documented tooltip string.
 TEST_CASE("menu_tooltips_header_table") {
     REQUIRE(menuHeaderTooltip(MenuGroup::Simulation) ==
             std::string("Choose the starting configuration"));
     REQUIRE(menuHeaderTooltip(MenuGroup::Cloud) ==
             std::string("Options for the random-cloud simulation"));
-    // Tooltips-everywhere task: no header keeps an empty tooltip.
+    // No header keeps an empty tooltip.
     REQUIRE(menuHeaderTooltip(MenuGroup::Physics) ==
             std::string("Choose how much time each step advances"));
     REQUIRE(menuHeaderTooltip(MenuGroup::Integrator) ==
@@ -391,8 +418,9 @@ TEST_CASE("menu_tooltips_header_table") {
             std::string("Options for the selected simulation"));
 }
 
+/// @brief Cloud row tooltips and the Simulation edge rows match the table.
 TEST_CASE("menu_tooltips_row_table_verbatim") {
-    // Cloud group row tooltips are untouched by the rework.
+    // The Cloud group's row tooltips are fixed strings.
     MenuState state;
     state.preset = PresetName::RandomCloud;
     REQUIRE(menuItemTooltip(MenuGroup::Cloud, 0, state) ==
@@ -404,18 +432,18 @@ TEST_CASE("menu_tooltips_row_table_verbatim") {
     REQUIRE(menuItemTooltip(MenuGroup::Cloud, 3, state) ==
             std::string("Use a random body count (2-2000)"));
 
-    // Simulation rows 6+ are gone (options/restart rows remap in the
-    // MenuModel tooltip task); out-of-range rows read empty through the
-    // count guard, and the lone separator row keeps an empty tooltip.
+    // Simulation has no rows 6+: out-of-range rows read empty through
+    // the count guard, and the lone separator row keeps an empty tooltip.
     REQUIRE(menuItemTooltip(MenuGroup::Simulation, 4, state).empty());
     REQUIRE(menuItemTooltip(MenuGroup::Simulation, 6, state).empty());
     REQUIRE(menuItemTooltip(MenuGroup::Simulation, 8, state).empty());
 }
 
+/// @brief Every visible row's tooltip appears in the documented set.
 TEST_CASE("menu_tooltips_complete_over_every_visible_row") {
     // Tooltips-everywhere law: every visible (group, row) carries one of
     // the documented strings; nothing falls outside the table and only
-    // the Simulation separator (row 4) stays empty (spec D.6).
+    // the Simulation separator (row 4) stays empty.
     const std::set<std::string> documented = {
         "",
         "Choose the starting configuration",
@@ -463,6 +491,7 @@ TEST_CASE("menu_tooltips_complete_over_every_visible_row") {
     }
 }
 
+/// @brief The disabled separator still hits as its own row index.
 TEST_CASE("menu_hit_disabled_row") {
     const auto layout = menuLayout(800.0, 600.0, MenuGroup::Simulation,
                                    PresetName::TwoBody);
@@ -477,17 +506,20 @@ TEST_CASE("menu_hit_disabled_row") {
 }
 
 // ---------------------------------------------------------------------------
-// Final-geometry laws (menu-bar rework task 6). These PIN the live-verified
-// width table {184,135,121,150,145} / x {10,202,345,474} / gap 8 by
-// asserting DERIVATION properties of the layout (chains, floors, slots),
-// never by hardcoding the table a second time.
+// Geometry laws. These pin the on-screen layout -- width table
+// {184,135,121,150,145} / x {10,202,345,474} / gap 8 -- by asserting
+// DERIVATION properties of the layout (chains, floors, slots), never by
+// hardcoding the table a second time.
 // ---------------------------------------------------------------------------
 
 namespace {
 
-// Index of the group's own header in the layout (-1 when hidden). Headers
-// are never addressable by enum index, so every geometry law resolves the
-// slot through headerGroups, exactly like the hit test does.
+/// @brief Index of the group's own header in the layout.
+/// Headers are never addressable by enum index, so every geometry law
+/// resolves the slot through headerGroups, exactly like the hit test does.
+/// @param layout The built menu layout to search.
+/// @param group The header's group to locate.
+/// @return The header slot index, or -1 when the group is hidden.
 int headerSlot(const nbody::app::MenuLayout& layout, MenuGroup group) {
     for (std::size_t index = 0; index < layout.headerGroups.size(); ++index) {
         if (layout.headerGroups[index] == group) {
@@ -499,6 +531,7 @@ int headerSlot(const nbody::app::MenuLayout& layout, MenuGroup group) {
 
 }  // namespace
 
+/// @brief Adjacent headers keep exactly an 8 px chain gap.
 TEST_CASE("geometry: adjacent visible headers keep exactly an 8 px gap") {
     // x positions are derived (previous right edge + kHeaderGap) for BOTH
     // last-slot variants (Cloud and Options) and every preset; assert the
@@ -517,6 +550,7 @@ TEST_CASE("geometry: adjacent visible headers keep exactly an 8 px gap") {
     }
 }
 
+/// @brief No header is narrower than the 90 px floor.
 TEST_CASE("geometry: header widths respect the 90 px floor") {
     // Widths are content-sized (label + value extents + padding) but
     // never below the min-width floor that stops tab jitter.
@@ -528,8 +562,9 @@ TEST_CASE("geometry: header widths respect the 90 px floor") {
     }
 }
 
+/// @brief The Options-last bar's right edge derives to 619 px.
 TEST_CASE("geometry: Options-last bar's right edge lands at 619") {
-    // Chain from the live widths: 10 + w0 + 8 + w1 + 8 + w2 + 8 + 145.
+    // Chain from the rendered widths: 10 + w0 + 8 + w1 + 8 + w2 + 8 + 145.
     // 619 appears ONCE; the widths themselves are pinned by
     // menu_header_geometry, so this is a derivation property, not a
     // second copy of the table.
@@ -551,6 +586,7 @@ TEST_CASE("geometry: Options-last bar's right edge lands at 619") {
     }
 }
 
+/// @brief Dropdowns track their header's x and floor at 140 px wide.
 TEST_CASE("geometry: dropdown panels track their slot and floor at 140") {
     // Every visible dropdown: x = owning header's x, width =
     // max(header width, 140) -- including the Options group.
@@ -579,6 +615,7 @@ TEST_CASE("geometry: dropdown panels track their slot and floor at 140") {
     }
 }
 
+/// @brief With Cloud last, the header chain leaves no blank slot behind.
 TEST_CASE("geometry: cloud-visible layout leaves no blank Options slot") {
     // Hidden-group law with the LAST slot taken by Cloud: the bar stays
     // 4 headers, the chain stays 8-gap, and there is no placeholder gap
@@ -603,13 +640,14 @@ TEST_CASE("geometry: cloud-visible layout leaves no blank Options slot") {
     REQUIRE(hit.group == MenuGroup::Cloud);
 }
 
+/// @brief Row text indents: 30 px on dot/value rows, 10 px on plain rows.
 TEST_CASE("geometry: dropdown row indent laws 10/30") {
-    // Pin the pure side of the indent law (spec builder call): rows that
-    // can carry a tick dot or hold a value/toggle keep dot-at-10 and
-    // text-at-30; PLAIN action rows (restart, cloud roll buttons) and the
-    // separator indent 10. renderMenu positions every generic label via
-    // menuRowTextIndent, so the render path cannot drift from this.
-    // (Focused field editors draw through the Task 5 pass and are out of
+    // Pin the pure side of the indent law: rows that can carry a tick dot
+    // or hold a value/toggle keep dot-at-10 and text-at-30; PLAIN action
+    // rows (restart, cloud roll buttons) and the separator indent 10.
+    // renderMenu positions every generic label via menuRowTextIndent, so
+    // the render path cannot drift from this.
+    // (Focused field editors draw through their own path and are out of
     // scope here.)
     CHECK(nbody::app::kMenuRowDotIndent == 10.0);
     for (PresetName preset : kAllPresets) {

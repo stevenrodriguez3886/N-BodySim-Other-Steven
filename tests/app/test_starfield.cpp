@@ -1,3 +1,7 @@
+/// @file test_starfield.cpp
+/// @brief Deterministic procedural starfield tests: purity, pan-subset
+/// stability, density, cell budget, dim ratio, palette, and the viewport
+/// star-rect corner math.
 #include "nbody/app/Starfield.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -17,6 +21,11 @@ using nbody::app::viewportStarRect;
 
 namespace {
 
+/// @brief Compares two star vectors star by star, field by field.
+/// @param a First star vector.
+/// @param b Second star vector.
+/// @return True only when the vectors agree on position, colour, size and
+/// dim for every star (and have equal size).
 bool sameStars(const std::vector<Star>& a, const std::vector<Star>& b) {
     if (a.size() != b.size()) {
         return false;
@@ -33,6 +42,13 @@ bool sameStars(const std::vector<Star>& a, const std::vector<Star>& b) {
     return true;
 }
 
+/// @brief True when the star's position lies within the closed rect.
+/// @param s The star to test.
+/// @param x0 Rect left edge (world units).
+/// @param y0 Rect bottom edge (world units).
+/// @param x1 Rect right edge (world units).
+/// @param y1 Rect top edge (world units).
+/// @return True when the star's position is inside (inclusive).
 bool inside(const Star& s, double x0, double y0, double x1, double y1) {
     return s.position.x >= x0 && s.position.x <= x1 &&
            s.position.y >= y0 && s.position.y <= y1;
@@ -40,6 +56,7 @@ bool inside(const Star& s, double x0, double y0, double x1, double y1) {
 
 }  // namespace
 
+/// @brief The same rect always yields the identical star vector.
 TEST_CASE("starfield_purity") {
     // Same rect (and same level) => identical vector: splitmix64 is a pure
     // function of the cell, no clock, no cross-call state.
@@ -49,8 +66,10 @@ TEST_CASE("starfield_purity") {
     CHECK_FALSE(first.empty());  // a nonzero field, not trivially pure
 }
 
+/// @brief A panned query reproduces the overlap stars bit-for-bit. The
+/// comparison is restricted to the shared cell coverage of the two rects.
 TEST_CASE("starfield_pan_subset_exact") {
-    // Pan-subset stability (spec D.5): the cell grid is global (level depends
+    // Pan-subset stability: the cell grid is global (level depends
     // on extents alone), so stars inside the overlap of a panned view are
     // BIT-identical. Compared inside shared coverage: a query only
     // guarantees stars in cells it scans (rect + one-cell halo), so the big
@@ -77,14 +96,17 @@ TEST_CASE("starfield_pan_subset_exact") {
     CHECK(sameStars(shared, filtered));
 }
 
+/// @brief A screen-sized rect yields a plausible star count.
 TEST_CASE("starfield_density_band") {
-    // A typical screen-sized rect (150 x 115 world units at the design zoom):
-    // wide 150..1500 band, real value ~300 (kStarDensityNum/Denom tunable).
+    // A typical screen-sized rect (150 x 115 world units at the default
+    // viewing scale): wide 150..1500 band, real value ~300 (the density
+    // ratio kStarDensityNum/kStarDensityDenom is tunable).
     const std::vector<Star> stars = starsInRect(0.0, 0.0, 150.0, 115.0);
     CHECK(stars.size() >= 150);
     CHECK(stars.size() <= 1500);
 }
 
+/// @brief The solar-system screen scans a sane cell count within budget.
 TEST_CASE("starfield_cells_fit_solar_screen") {
     // Solar-system preset screen (800x600 px, Pluto fit => scale ~1.14,
     // world rect ~700x525) must scan a sane cell count and stay inside the
@@ -94,6 +116,7 @@ TEST_CASE("starfield_cells_fit_solar_screen") {
     CHECK(cells <= 30000);
 }
 
+/// @brief Huge rects stay inside the cell budget via level doubling.
 TEST_CASE("starfield_cell_budget_huge_rect") {
     // The level doubling keeps huge rects affordable: <= 30000 cells.
     CHECK(cellsScannedInRect(0.0, 0.0, 1.0e9, 1.0e9) <= 30000);
@@ -104,6 +127,7 @@ TEST_CASE("starfield_cell_budget_huge_rect") {
           cellsScannedInRect(0.0, 0.0, 1.0e9, 1.0e9));
 }
 
+/// @brief Roughly 40% of stars carry the dim flag.
 TEST_CASE("starfield_dim_ratio") {
     // dim ~40% by design; measured on two disjoint rects, band 30..50%.
     const auto small = starsInRect(0.0, 0.0, 150.0, 115.0);
@@ -127,6 +151,7 @@ TEST_CASE("starfield_dim_ratio") {
     CHECK(ratio <= 0.50);
 }
 
+/// @brief Stars are 1-2 px and drawn only in palette tones.
 TEST_CASE("starfield_sizes_and_palette") {
     const std::vector<Star> stars = starsInRect(0.0, 0.0, 150.0, 115.0);
     std::set<std::tuple<std::uint8_t, std::uint8_t, std::uint8_t>> colors;
@@ -145,8 +170,8 @@ TEST_CASE("starfield_sizes_and_palette") {
     }
     CHECK(hasSize1);  // both sizes present
     CHECK(hasSize2);
-    // Colors must all come from the public 4-tone palette (spec D.5: exactly
-    // four tones), and the field must actually show more than one of them.
+    // Colors must all come from the public palette (exactly four tones),
+    // and the field must actually show more than one of them.
     std::set<std::tuple<std::uint8_t, std::uint8_t, std::uint8_t>> palette;
     for (const auto& rgb : kStarPalette) {
         palette.emplace(rgb[0], rgb[1], rgb[2]);
@@ -159,12 +184,15 @@ TEST_CASE("starfield_sizes_and_palette") {
     }
 }
 
+/// @brief Degenerate or inverted rects return no stars, never a hang.
 TEST_CASE("starfield_empty_rect") {
     // Degenerate/inverted rects are safe (no infinite scan).
     CHECK(starsInRect(5.0, 5.0, 5.0, 5.0).empty());
     CHECK(starsInRect(10.0, 10.0, 0.0, 0.0).empty());
 }
 
+/// @brief The viewport star rect spans the whole screen, corners chosen
+/// with the y-flip in mind, and stars reach its right/top edges.
 TEST_CASE("starfield_viewport_rect_spans_screen") {
     // Regression pin for SimulationApp::render's corner math: with y-flipped
     // toWorld, the viewport rect is (tl.x, br.y) .. (br.x, tl.y) -- using

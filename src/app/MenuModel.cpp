@@ -1,3 +1,10 @@
+/// @file
+/// Implementation of the menu state model: the staged mirror storage
+/// behind MenuState, the dt/preset/integrator lookup tables, the label
+/// and tooltip tables for every dropdown row, and the staged-summary
+/// rendering. The staging law (live apply clears the mirror, paused edit
+/// records into it) is implemented identically in every setter here.
+
 #include "nbody/app/MenuModel.hpp"
 
 #include <array>
@@ -8,11 +15,13 @@
 
 namespace nbody::app {
 
+/// @brief The pimpl payload: everything not a plain live value.
 struct MenuState::Impl {
-    MenuStaged staged;
-    mutable std::string summary;
+    MenuStaged staged;         ///< Pending paused edits.
+    mutable std::string summary;  ///< Scratch buffer for staged summaries.
 };
 
+/// @brief Friend bridge into MenuState's private impl_ pointer.
 struct MenuModelAccess {
     static MenuState::Impl& get(MenuState& state) { return *state.impl_; }
     static const MenuState::Impl& get(const MenuState& state) {
@@ -22,25 +31,27 @@ struct MenuModelAccess {
 
 namespace {
 
+/// @brief One entry of the Physics dropdown's dt list.
 struct DtOption {
-    double value;
-    const char* label;
+    double value;     ///< Sim seconds per step.
+    const char* label;  ///< Row label, written as a fraction ("1/120").
 };
 
+/// @brief The dt rows, fastest (largest) step first.
 constexpr std::array<DtOption, 5> kDtOptions = {{{1.0 / 30.0, "1/30"},
                                                 {1.0 / 60.0, "1/60"},
                                                 {1.0 / 120.0, "1/120"},
                                                 {1.0 / 240.0, "1/240"},
                                                 {1.0 / 480.0, "1/480"}}};
 
-// Spec D.6 tooltip strings (verbatim) not covered by menuHeaderTooltip.
+/// @brief Tooltip strings (verbatim) not covered by menuHeaderTooltip.
 constexpr char kRestartTooltip[] = "Rebuild the scene from the current settings";
 constexpr char kSeparationTooltip[] = "Distance between the bodies at t=0";
 constexpr char kPathTooltip[] = "Circular orbit or unbound fly-by";
 constexpr char kPlanetsTooltip[] = "How many planets (inside-out)";
 constexpr char kPlutoTooltip[] = "Include Pluto at ~200 units";
-// Tooltips-everywhere task: one-line scene descriptions for the
-// Simulation preset rows (table index == preset row index == enum order).
+/// @brief One-line scene descriptions for the Simulation preset rows
+/// (table index == preset row index == enum order).
 constexpr char kTwoBodySceneTooltip[] =
     "Two bodies orbiting or flying past each other";
 constexpr char kSolarSceneTooltip[] =
@@ -49,12 +60,17 @@ constexpr char kCloudSceneTooltip[] =
     "A random swarm of bodies with random velocities";
 constexpr char kFigureEightSceneTooltip[] =
     "Three bodies tracing a figure-eight";
+/// @brief Scene tooltips indexed by preset row (see order above).
 constexpr std::array<const char*, 4> kSceneTooltips = {
     kTwoBodySceneTooltip, kSolarSceneTooltip, kCloudSceneTooltip,
     kFigureEightSceneTooltip};
 constexpr char kRk4Tooltip[] = "Accurate 4th-order Runge-Kutta stepping";
 constexpr char kEulerTooltip[] = "Fast Euler stepping (drifts over time)";
 
+/// @brief The preset's row position in the Simulation dropdown (its
+/// enum value doubles as the row index).
+/// @param preset The preset whose row is sought.
+/// @return 0-3 for a valid preset, -1 otherwise.
 int presetIndex(core::PresetName preset) {
     switch (preset) {
         case core::PresetName::TwoBody:
@@ -69,6 +85,9 @@ int presetIndex(core::PresetName preset) {
     return -1;
 }
 
+/// @brief The integrator's row position in the Integrator dropdown.
+/// @param integrator The integrator whose row is sought.
+/// @return 0 (rk4) or 1 (euler), -1 otherwise.
 int integratorIndex(core::IntegratorKind integrator) {
     switch (integrator) {
         case core::IntegratorKind::Rk4:
@@ -79,9 +98,11 @@ int integratorIndex(core::IntegratorKind integrator) {
     return -1;
 }
 
-// Shortest honest rendering for option values: integers print bare
-// ("separation: 10"), fractional values up to 4 significant digits
-// ("separation: 10.5"). Field grammar caps input well below that.
+/// @brief Shortest honest rendering for option values: integers print
+/// bare ("separation: 10"), fractional values up to 4 significant digits
+/// ("separation: 10.5"). The field grammars cap input well below that.
+/// @param value The number to render.
+/// @return The display text.
 std::string formatNumber(double value) {
     if (std::isfinite(value) && value == std::floor(value) &&
         std::fabs(value) < 1e15) {
@@ -92,6 +113,12 @@ std::string formatNumber(double value) {
     return out.str();
 }
 
+/// @brief Flip the two-body path toggle: the staged mirror when one
+/// already holds a flip, else the live value; a live flip clears any
+/// staged one.
+/// @param state The menu state, mutated per the paused/live law.
+/// @param paused When true, only the staged mirror is touched.
+/// @return Staged while paused; PathChanged when flipped live.
 MenuEffect toggleHyperbolic(MenuState& state, bool paused) {
     auto& staged = MenuModelAccess::get(state).staged;
     if (paused) {
@@ -104,6 +131,11 @@ MenuEffect toggleHyperbolic(MenuState& state, bool paused) {
     return MenuEffect::PathChanged;
 }
 
+/// @brief Flip the Pluto toggle; same effective-value law as
+/// toggleHyperbolic.
+/// @param state The menu state, mutated per the paused/live law.
+/// @param paused When true, only the staged mirror is touched.
+/// @return Staged while paused; PlutoChanged when flipped live.
 MenuEffect togglePluto(MenuState& state, bool paused) {
     auto& staged = MenuModelAccess::get(state).staged;
     if (paused) {
@@ -164,8 +196,8 @@ MenuEffect menuApply(MenuState& state, const MenuAction& action,
 
     switch (action.group) {
         case MenuGroup::Simulation: {
-            // Row table (spec D.1): 0-3 presets, 4 separator, 5 restart.
-            // The preset's option rows live in the Options group.
+            // Row table: 0-3 presets, 4 separator, 5 restart. The
+            // preset's option rows live in the Options group.
             if (action.index < 0 || action.index >= 6) {
                 return MenuEffect::None;
             }
@@ -203,8 +235,8 @@ MenuEffect menuApply(MenuState& state, const MenuAction& action,
             return MenuEffect::IntegratorChanged;
 
         case MenuGroup::Physics:
-            // dt list only: the separator (5) and restart (6) rows moved
-            // into Simulation (spec D.1).
+            // dt list only: the separator and restart rows live in the
+            // Simulation group.
             if (action.index >= 0 && action.index < 5) {
                 const double dt =
                     kDtOptions[static_cast<std::size_t>(action.index)].value;
@@ -452,7 +484,7 @@ const char* menuStagedSummary(const MenuState& state) {
     };
 
     // Contract order (Space-resume law): preset, integrator, dt, seed,
-    // then the option clauses, restart-summary style (spec D.3).
+    // then the option clauses, restart-summary style.
     if (model.staged.preset) {
         append(std::string("preset → ") + menuPresetName(*model.staged.preset));
     }

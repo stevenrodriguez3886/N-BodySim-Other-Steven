@@ -1,3 +1,7 @@
+/// @file
+/// Fixed-dt stepping plus overlap resolution: integrate, then repeatedly
+/// merge any overlapping pair until the scene is collision-free again.
+
 #include "nbody/core/PhysicsWorld.hpp"
 
 #include <cassert>
@@ -15,8 +19,8 @@ PhysicsWorld::PhysicsWorld(WorldConfig cfg, std::unique_ptr<IIntegrator> integra
 
 void PhysicsWorld::step() {
 #ifndef NDEBUG
-    // NaN poisoning guard (review focus #2): a non-finite state before a step
-    // means something upstream already broke; catch it at the source.
+    // NaN poisoning guard: a non-finite state before a step means something
+    // upstream already broke; catch it at the source.
     for (const Body& body : bodies_) {
         assert(std::isfinite(body.position.x) && std::isfinite(body.position.y));
         assert(std::isfinite(body.velocity.x) && std::isfinite(body.velocity.y));
@@ -94,12 +98,12 @@ std::uint64_t PhysicsWorld::mergeCount() const {
 }
 
 void PhysicsWorld::resolveCollisions() {
-    // Plan C.4: overlap iff d^2 < (r_i + r_j)^2. Larger mass survives (tie:
-    // lower id); survivor gets m=m1+m2, x=COM, v=momentum-weighted, r=sqrt
-    // (r1^2+r2^2) and keeps its id; loser is swap-and-pop erased. Every merge
-    // restarts the whole scan, so mid-vector erasures are handled by
-    // construction. Each merging pass strictly decreases N, so <= N-1 merging
-    // passes suffice; the 4N cap below only fires on an implementation bug.
+    // Overlap iff d^2 < (r_i + r_j)^2. Larger mass survives (tie: lower
+    // id); survivor gets m=m1+m2, x=COM, v=momentum-weighted, r=sqrt
+    // (r1^2+r2^2) and keeps its id; loser is swap-and-pop erased. Every
+    // merge restarts the whole scan, so mid-vector erasures are handled by
+    // construction. Each merging pass strictly decreases N, so <= N-1 merges
+    // suffice; the 4N cap below only fires on an implementation bug.
     const std::size_t n0 = bodies_.size();
     std::uint32_t passes = 0;
     bool merged = true;

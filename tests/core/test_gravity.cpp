@@ -1,3 +1,9 @@
+/// @file
+/// Unit tests for GravityField::computeAccelerations: Newton's third law
+/// (total momentum cannot change), inverse-square direction and magnitude on
+/// an axis-aligned pair, the softening cap at vanishing separation, and the
+/// output-vector resize behaviour for shrinking and empty inputs.
+
 #include <cmath>
 #include <vector>
 
@@ -13,6 +19,11 @@ using Catch::Approx;
 
 namespace {
 
+/// @brief Bounds-checked accessor into the acceleration output vector, so a
+/// wrong output size fails with a clear REQUIRE instead of reading garbage.
+/// @param accel The acceleration vector produced by computeAccelerations.
+/// @param i The body index to read.
+/// @return The acceleration vector of body i.
 Vec2 accelAt(const std::vector<Vec2>& accel, std::size_t i) {
     REQUIRE(i < accel.size());
     return accel[i];
@@ -20,6 +31,8 @@ Vec2 accelAt(const std::vector<Vec2>& accel, std::size_t i) {
 
 }  // namespace
 
+/// @brief Newton's third law: summing mass-weighted accelerations over all
+/// bodies (the time derivative of total momentum) must give zero.
 TEST_CASE("gravity_third_law") {
     // Three arbitrary bodies: sum of mass-weighted accelerations (the
     // derivative of total momentum) must vanish exactly-ish.
@@ -41,6 +54,9 @@ TEST_CASE("gravity_third_law") {
     CHECK(pDot.y == Approx(0.0).margin(1e-12));
 }
 
+/// @brief Two bodies on the x-axis pull toward each other with magnitude
+/// G*m_other/(d^2 + eps^2) -- the receiver's own mass cancels -- and the
+/// third law holds on the magnitudes as well as the vector sum.
 TEST_CASE("gravity_inverse_square_direction") {
     // Two bodies on the x-axis; body 0 must accelerate toward body 1 (+x),
     // body 1 toward body 0 (-x). |a0| = G*m1/(d^2+eps^2); m0 cancels.
@@ -70,6 +86,9 @@ TEST_CASE("gravity_inverse_square_direction") {
           Approx(expected * m0 / m1).epsilon(1e-12));
 }
 
+/// @brief Exactly coincident bodies interact via neither the softened
+/// potential nor a divide-by-zero: the pair is skipped and the result stays
+/// finite (exactly zero), never NaN or inf.
 TEST_CASE("gravity_softening_finite") {
     // Two bodies at identical positions: d < kZeroDist, pair skipped, so
     // accelerations are finite and exactly zero (no NaN/inf).
@@ -90,6 +109,8 @@ TEST_CASE("gravity_softening_finite") {
     }
 }
 
+/// @brief Approaching zero separation from above the kZeroDist cutoff, the
+/// softening term caps the force at ~G*m/eps^2 instead of letting it diverge.
 TEST_CASE("gravity_softening_limits_force") {
     // d -> 0 (but above kZeroDist): the softening caps the force, |a| ~ G*m/eps^2.
     const double g = 1.0;
@@ -110,6 +131,8 @@ TEST_CASE("gravity_softening_limits_force") {
     CHECK(std::isfinite(accelAt(accel, 1).x));
 }
 
+/// @brief The output vector is fully rewritten on every call, including
+/// shrinking: a smaller body count leaves no stale entries behind.
 TEST_CASE("gravity_out_accel_resizes_down") {
     // A previous (larger) outAccel must be fully rewritten: after a 3-body
     // call, a 1-body call leaves size 1 with entry 0 == {0,0}.
@@ -134,6 +157,7 @@ TEST_CASE("gravity_out_accel_resizes_down") {
     CHECK(accelAt(accel, 0).y == 0.0);
 }
 
+/// @brief An empty body list empties the output vector without crashing.
 TEST_CASE("gravity_empty_input") {
     // n = 0: no writes, no crash; out is sized to 0.
     const GravityField field{1.0, 0.05};

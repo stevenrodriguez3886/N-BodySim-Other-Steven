@@ -1,3 +1,8 @@
+/// @file
+/// The procedural star generator: grid sizing, the splitmix64 per-cell
+/// stream, and the viewport query. All constants and the field laws are
+/// documented with the declarations in Starfield.hpp.
+
 #include "nbody/app/Starfield.hpp"
 
 #include <algorithm>
@@ -9,22 +14,29 @@
 namespace nbody::app {
 namespace {
 
-// Spec D.5 constants. The density pair is the one-line tunable: raising the
-// numerator (or lowering the denominator) thickens the field everywhere.
+/// @brief Salt folded into every cell hash; iterating splitmix64 from the
+///   seeded state streams that cell's decisions. Changing it reshuffles the
+///   whole sky.
 constexpr std::uint64_t kStarHashSeed = 0x57415A53ULL;  // "STARS"
-constexpr double kStarBaseCell = 25.0;  // world-unit cell at level 0
-// Star presence: kStarDensityNum/kStarDensityDenom of the scanned cells
-// carry a star (~25%, spec D.5).
+/// @brief Cell edge at level 0, world units; level L uses 2^L times this.
+constexpr double kStarBaseCell = 25.0;
+/// @brief Star presence: kStarDensityNum/kStarDensityDenom of the scanned
+///   cells carry a star (~25%). The density pair is the one-line tunable:
+///   raising the numerator (or lowering the denominator) thickens the
+///   field everywhere.
 constexpr std::uint64_t kStarDensityNum = 1;
 constexpr std::uint64_t kStarDensityDenom = 4;
-// Cells per query: the level (up OR down, powers of two) is always chosen
-// so the scan fits this budget, which pins the on-screen star count to
-// ~kStarMaxCells * num/denom ~= 600-1200 at EVERY zoom. One-line tunable
-// together with the density pair; 1/6 of the 30000-cell/frame budget.
+/// @brief Cell budget per query: the level (up OR down, powers of two) is
+///   always chosen so the scan fits this, which pins the on-screen star
+///   count to ~kStarMaxCells * num/denom, roughly 600-1200 at EVERY zoom.
+///   One-line tunable together with the density pair; 1/6 of the
+///   30000-cell/frame budget.
 constexpr std::uint64_t kStarMaxCells = 4800;
 
-// Canonical splitmix64 finalizer (Steele/Lea/Venson): a pure 64->64-bit
-// bijection; iterating it with the increment forms a deterministic stream.
+/// @brief Canonical splitmix64 finalizer (Steele/Lea/Venson).
+/// @param x Stream state, advanced by the fixed increment.
+/// @return A 64-bit output; a pure 64->64-bit bijection, so iterating it
+///         with the increment forms a deterministic per-cell stream.
 std::uint64_t splitmix64(std::uint64_t& x) {
     x += 0x9E3779B97F4A7C15ULL;
     std::uint64_t z = x;
@@ -33,10 +45,14 @@ std::uint64_t splitmix64(std::uint64_t& x) {
     return z ^ (z >> 31);
 }
 
-// Cell edge for a rect's extents: the cell of the smallest level (which may
-// be negative, shrinking below the base cell at deep zoom) whose rect scan
-// fits kStarMaxCells. The level depends on the extents ALONE, so panning
-// (equal extents) always re-queries the same global grid.
+/// @brief Cell edge for a rect's extents: the cell of the smallest level
+///   (which may be negative, shrinking below the base cell at deep zoom)
+///   whose rect scan fits kStarMaxCells.
+/// @param dx Rect width in world units.
+/// @param dy Rect height in world units.
+/// @return The chosen cell edge; the base cell for non-positive extents.
+/// @note The level depends on the extents ALONE, so panning (equal
+///   extents) always re-queries the same global grid.
 double cellSizeFor(double dx, double dy) {
     if (!(dx > 0.0) || !(dy > 0.0)) {
         return kStarBaseCell;
@@ -68,9 +84,17 @@ double cellSizeFor(double dx, double dy) {
     return kStarBaseCell * std::ldexp(1.0, level);
 }
 
-// Cells starsInRect visits along one axis: the covered range plus a one-cell
-// halo, since a star jitters strictly inside its own cell (offset in [0,1)
-// cell widths).
+/// @brief Cell indices starsInRect visits along one axis: the covered
+///   range plus a one-cell halo.
+/// @param x0 Low edge of the rect on this axis, world units.
+/// @param x1 High edge; must exceed x0.
+/// @param cell Cell edge from cellSizeFor.
+/// @param first First cell index to scan (one below the covered floor).
+/// @param last Last cell index to scan (one above the covered floor).
+/// @return false when x1 <= x0 (an empty axis).
+/// @note The halo is exact because a star jitters strictly inside its own
+///   cell (offset in [0,1) cell widths), so only halo cells can contribute
+///   stars outside the rect.
 bool cellRange(double x0, double x1, double cell, std::int64_t& first,
                std::int64_t& last) {
     if (!(x1 > x0)) {
@@ -81,14 +105,22 @@ bool cellRange(double x0, double x1, double cell, std::int64_t& first,
     return last >= first;
 }
 
+// The cell lattice a rect scans: shared by the scan and the budget query.
 struct CellGrid {
-    double cell = kStarBaseCell;
-    std::int64_t xFirst = 0;
-    std::int64_t xLast = -1;
-    std::int64_t yFirst = 0;
-    std::int64_t yLast = -1;
+    double cell = kStarBaseCell;  ///< cell edge, world units
+    std::int64_t xFirst = 0;  ///< first scanned column (halo included)
+    std::int64_t xLast = -1;  ///< last scanned column (halo included)
+    std::int64_t yFirst = 0;  ///< first scanned row (halo included)
+    std::int64_t yLast = -1;  ///< last scanned row (halo included)
 };
 
+/// @brief Fill `out` with the lattice for a rect, rejecting empty rects.
+/// @param x0 Left edge of the world rect.
+/// @param y0 Bottom edge of the world rect.
+/// @param x1 Right edge; must exceed x0.
+/// @param y1 Top edge; must exceed y0.
+/// @param out The lattice to fill; meaningful only when true is returned.
+/// @return false when either axis is empty.
 bool gridForRect(double x0, double y0, double x1, double y1, CellGrid& out) {
     if (!(x1 > x0) || !(y1 > y0)) {
         return false;
@@ -140,7 +172,7 @@ std::vector<Star> starsInRect(double x0, double y0, double x1, double y1) {
     for (std::int64_t cy = grid.yFirst; cy <= grid.yLast; ++cy) {
         for (std::int64_t cx = grid.xFirst; cx <= grid.xLast; ++cx) {
             // Coordinate mix is the canonical cant pair (asymmetric
-            // multipliers), then the D.5 constant folds in.
+            // multipliers), then the salt constant folds in.
             std::uint64_t s = (static_cast<std::uint64_t>(cx) *
                                    0x9E3779B97F4A7C15ULL) ^
                               (static_cast<std::uint64_t>(cy) *

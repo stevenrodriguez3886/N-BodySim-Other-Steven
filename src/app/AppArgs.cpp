@@ -1,3 +1,7 @@
+/// @file
+/// Implementation of the command-line grammar declared in AppArgs.hpp:
+/// per-flag value parsers and the main argument loop.
+
 #include "nbody/app/AppArgs.hpp"
 
 #include <cerrno>
@@ -12,9 +16,14 @@
 namespace nbody::app {
 namespace {
 
-// Shared digit-string parse: value must start with a digit (strtoull would
-// happily eat a leading sign) and be fully consumed. Sets `overflow` on
-// ERANGE rather than failing.
+/// @brief Shared digit-string parse for the unsigned flags.
+/// @param value The flag value text after '='.
+/// @param out Parsed magnitude on success; undefined on failure.
+/// @param overflow Set true when the digits exceed 64-bit range (the parse
+///                 still succeeds; each caller decides reject vs. clamp).
+/// @return true when the value starts with a digit and is fully consumed.
+/// @note A leading sign is rejected up front because strtoull would
+///   happily eat one.
 bool parseUnsignedLongLong(std::string_view value,
                            unsigned long long& out, bool& overflow) {
     overflow = false;
@@ -32,9 +41,13 @@ bool parseUnsignedLongLong(std::string_view value,
     return true;
 }
 
-// --seed: signed int64 (spec D.3), leading '-' allowed. Digits must be fully
-// consumed; overflow CLAMPS to the int64 bounds (range check on the strtoll
-// result rather than silent wraparound, per the Task 7 edge-case rule).
+/// @brief Parse the --seed value: signed int64, a leading '-' allowed.
+/// @param value The flag value text after '='.
+/// @param out The seed on success; untouched on failure.
+/// @return true when the digits (past an optional '-') are fully consumed.
+/// @note Overflow clamps to the int64 bounds — a range check on the
+///   strtoll result rather than silent wraparound, so an out-of-range seed
+///   still names a usable (extreme) seed instead of erroring out.
 bool parseSeed(std::string_view value, std::int64_t& out) {
     if (value.empty()) {
         return false;
@@ -61,7 +74,10 @@ bool parseSeed(std::string_view value, std::int64_t& out) {
     return true;
 }
 
-// --bodies: digits, clamped to [2, 2000] (spec D.3; overflow clamps high).
+/// @brief Parse the --bodies value: digits, clamped to [2, 2000].
+/// @param value The flag value text after '='.
+/// @param out The clamped count on success.
+/// @return false only when the digits are malformed; overflow clamps high.
 bool parseBodies(std::string_view value, std::uint32_t& out) {
     unsigned long long v = 0;
     bool overflow = false;
@@ -76,8 +92,11 @@ bool parseBodies(std::string_view value, std::uint32_t& out) {
     return true;
 }
 
-// --headless: overflow is a rejection (clamping to 2^64 steps would just
-// wedge the run).
+/// @brief Parse the --headless value: plain digits, no clamping.
+/// @param value The flag value text after '='.
+/// @param out The step count on success.
+/// @return false on malformed digits or overflow — clamping to 2^64 steps
+///   would just wedge the run.
 bool parseSteps(std::string_view value, std::uint64_t& out) {
     unsigned long long v = 0;
     bool overflow = false;
@@ -88,8 +107,12 @@ bool parseSteps(std::string_view value, std::uint64_t& out) {
     return true;
 }
 
-// Usage errors go to stderr (stdout stays reserved for program output;
-// --help keeps printing usage on stdout with exit 0 in main).
+/// @brief Report a parse error and the usage text, then (via the caller)
+///   fail the parse.
+/// @param arg The offending argument text, or empty for a flagless error.
+/// @param reason Human-readable cause, printed before the argument.
+/// @note Errors go to stderr so stdout stays reserved for program output;
+///   --help still prints usage on stdout with exit 0 in main.
 void fail(std::string_view arg, std::string_view reason) {
     std::cerr << "nbody: " << reason;
     if (!arg.empty()) {
@@ -186,9 +209,11 @@ std::optional<AppArgs> parseArgs(int argc, char** argv) {
             char* end = nullptr;
             const std::string copy(value);
             const double dt = std::strtod(copy.c_str(), &end);
-            // dt > 10 is a sanity bound, not physics: it prevents a silent
-            // NaN cascade in Release builds (Debug already asserts finiteness
-            // in PhysicsWorld::step).
+            // The (0, 10] window is a sanity bound, not physics: fully
+            // consumed digits, no range error, finite, positive, and at
+            // most 10 — which prevents a silent NaN cascade in Release
+            // builds (Debug already asserts finiteness in
+            // PhysicsWorld::step).
             if (end != copy.c_str() + copy.size() || errno == ERANGE ||
                 !std::isfinite(dt) || dt <= 0.0 || dt > 10.0) {
                 fail(value, "--dt must be a positive finite number");

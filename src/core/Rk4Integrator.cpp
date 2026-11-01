@@ -1,15 +1,22 @@
+/// @file
+/// Classical RK4 over the coupled (x, v) system: four freshly evaluated
+/// gravity stages, combined as y += (dt/6)(k1 + 2k2 + 2k3 + k4).
+
 #include "nbody/core/Rk4Integrator.hpp"
 
 namespace nbody::core {
 
 namespace {
 
-// Builds the Body-shaped derivative vector k = f(y) for a stage: k.position
-// is the stage's velocity (dx/dt) and k.velocity is the acceleration at the
-// stage's positions (dv/dt), freshly evaluated by the gravity field.
-// Sets each k's velocity from computeAccelerations, then overwrites
-// k.position with the stage velocity; mass/id/radius are carried over so the
-// gravity evaluation sees the right masses (positions/velocities from stage).
+/// @brief Build the Body-shaped derivative vector k = f(y) for one stage.
+/// k.position becomes the stage velocity (dx/dt) and k.velocity the
+/// acceleration at the stage positions (dv/dt), freshly evaluated by the
+/// gravity field. Mass/id/radius are carried over so the gravity evaluation
+/// sees the right masses (positions/velocities come from the stage).
+/// @param stage The stage's state (pos/vel/mass).
+/// @param gravity Field evaluated at the stage positions.
+/// @param accel Scratch accelerations, fully rewritten.
+/// @param k Output derivative vector, filled in place.
 void derivative(const std::vector<Body>& stage, const GravityField& gravity,
                 std::vector<Vec2>& accel, std::vector<Body>& k) {
     k = stage;  // carries mass/id/radius through the gravity evaluation
@@ -20,10 +27,14 @@ void derivative(const std::vector<Body>& stage, const GravityField& gravity,
     }
 }
 
-// stage = y + s * k, starting from the ORIGINAL y (never accumulates).
-// Stages carry only pos/vel/mass; radius/id are deliberately not propagated
-// (gravity uses mass/position only; collisions run on bodies_, not this
-// stage scratch).
+/// @brief stage = y + s * k, always starting from the ORIGINAL y (stages
+/// never accumulate onto each other). Stages carry only pos/vel/mass;
+/// radius/id are deliberately not propagated (gravity uses mass/position
+/// only; collisions run on the world's bodies, not this stage scratch).
+/// @param y The original step-start state.
+/// @param k The derivative vector to scale by s.
+/// @param s The stage's time offset in seconds.
+/// @param stage Output stage, filled in place.
 void stageFrom(const std::vector<Body>& y, const std::vector<Body>& k,
                double s, std::vector<Body>& stage) {
     for (std::size_t i = 0; i < y.size(); ++i) {
@@ -39,7 +50,7 @@ void Rk4Integrator::step(std::vector<Body>& bodies,
                         const GravityField& gravity, double dt) {
     const std::size_t n = bodies.size();
     // Resize scratch when the body count changed since the last step
-    // (Task 6 merges can shrink the vector between steps).
+    // (world merges can erase bodies between steps).
     if (k1_.size() != n) {
         k1_.resize(n);
         k2_.resize(n);
@@ -48,8 +59,8 @@ void Rk4Integrator::step(std::vector<Body>& bodies,
         stage_.resize(n);
     }
 
-    // Classical RK4 on y' = f(y) (plan C.3). Every stage starts from the
-    // ORIGINAL y = bodies; stages never accumulate onto each other.
+    // Classical RK4 on y' = f(y). Every stage starts from the ORIGINAL
+    // y = bodies; stages never accumulate onto each other.
     derivative(bodies, gravity, accel_, k1_);
 
     stageFrom(bodies, k1_, 0.5 * dt, stage_);

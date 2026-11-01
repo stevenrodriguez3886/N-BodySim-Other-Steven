@@ -1,7 +1,9 @@
-// Task 9 dispatch: parseArgs -> help / headless / smoke / windowed. The
-// windowed path now constructs the real SimulationApp; the display probe
-// stays (SFML aborts uncatchably without an X display, and SimulationApp's
-// ctor opens a window, so the probe must gate construction).
+/// @file
+/// Program entry: parse the command line, then take exactly one of the four
+/// paths — print usage, run headless for N steps, run the window-smoke
+/// check, or launch the interactive windowed app. The windowed path gates
+/// construction behind a display probe (SFML aborts uncatchably without an
+/// X display, and SimulationApp's ctor opens a window).
 #include <SFML/Graphics.hpp>
 
 #include <dlfcn.h>
@@ -19,11 +21,14 @@
 #include "nbody/core/Presets.hpp"
 
 namespace {
-constexpr sf::Vector2u kWindowSize{800U, 600U};
+constexpr sf::Vector2u kWindowSize{800U, 600U};  ///< shared by smoke + app
 
-// SFML calls std::abort() (uncatchable) when it cannot open the X display, so
-// probe availability first via dlopen'd XOpenDisplay — no hard X11 link
-// dependency, and a NULL DISPLAY simply fails the probe.
+/// @brief Probe whether an X display can be opened, without linking X11.
+/// SFML calls std::abort() (uncatchable) when it cannot open the display, so
+/// availability is checked first via a dlopen'd XOpenDisplay — a NULL
+/// DISPLAY simply fails the probe.
+/// @return True when a display is reachable (or the probe is unavailable,
+/// deferring to SFML's own error reporting).
 bool displayReachable() {
     void* handle = dlopen("libX11.so.6", RTLD_NOW | RTLD_LOCAL);
     if (handle == nullptr) {
@@ -47,9 +52,11 @@ bool displayReachable() {
     return reachable;
 }
 
-// Smoke check (nbody --smoke, the nbody_smoke ctest entry): must exit 0 with
-// or without a display — if no display can be opened (SFML would abort),
-// report headless-ok and succeed. Window ctor exceptions are caught too.
+/// @brief Smoke check (nbody --smoke, the nbody_smoke ctest entry): must
+/// exit 0 with or without a display — if no display can be opened (SFML
+/// would abort), report headless-ok and succeed. Window ctor exceptions are
+/// caught too.
+/// @return 0 in every outcome (display ok, headless-ok, or caught failure).
 int runSmoke() {
     if (!displayReachable()) {
         std::cout << "SMOKE headless-ok\n";
@@ -70,9 +77,11 @@ int runSmoke() {
     return 0;
 }
 
-// CLI token spellings, reused for the windowed path's title/HUD prefix
-// ("<preset> | <integrator>", per plan D.2). SimulationApp appends the live
-// FPS/UPS/body/time stats to this base.
+/// @brief Build the window title's base ("<preset> | <integrator>") from
+/// the CLI token spellings. SimulationApp appends the live FPS/UPS/body/
+/// time stats to this base.
+/// @param a The parsed command line.
+/// @return The title prefix naming the chosen preset and integrator.
 std::string windowTitle(const nbody::app::AppArgs& a) {
     std::string_view preset = "two-body";
     switch (a.preset) {
@@ -124,17 +133,16 @@ int main(int argc, char** argv) {
         return runSmoke();
     }
 
-    // --- Windowed path: the real interactive app (Task 9) -------------------
-    // The display probe stays in main.cpp: SimulationApp's ctor opens a
+    // --- Windowed path: the real interactive app ----------------------------
+    // The display probe lives here: SimulationApp's ctor opens a
     // window, and SFML abort()s uncatchably without an X display.
     if (!displayReachable()) {
         std::cout << "nbody: cannot open a display; use --headless=<n>\n";
         return 1;
     }
     const std::string title = windowTitle(*args);
-    // The windowed app now carries the full signed int64 seed in MenuState
-    // (spec D.3); the scene itself is already built from it via the setup
-    // above.
+    // The windowed app carries the full signed int64 seed in MenuState; the
+    // scene itself is already built from it via the setup above.
     nbody::app::SimulationApp app{std::move(setup), args->preset, args->seed,
                                   args->bodies, args->integrator, title};
     return app.run();

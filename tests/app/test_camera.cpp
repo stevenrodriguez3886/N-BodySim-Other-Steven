@@ -1,6 +1,7 @@
-// Camera transform tests: pure double math, no SFML, no display required.
-// toPixels/toWorld must be written independently (plan D.3), so the roundtrip
-// test here cross-checks the forward transform against its algebraic inverse.
+/// @file test_camera.cpp
+/// @brief Camera transform tests: pure double math, no SFML, no display.
+/// toPixels/toWorld are independent implementations, so the roundtrip test
+/// cross-checks the forward transform against its algebraic inverse.
 #include <cmath>
 
 #include <catch2/catch_test_macros.hpp>
@@ -14,12 +15,15 @@ using nbody::core::Vec2;
 
 namespace {
 
+// Fixed window extents shared by every transform assertion below.
 constexpr double kWinW = 800.0;
 constexpr double kWinH = 600.0;
 constexpr double kEps = 1e-9;
 
 }  // namespace
 
+/// @brief toWorld(toPixels(w)) recovers w within epsilon, over a fixed
+/// deterministic spread of world points, scales, and centers.
 TEST_CASE("camera_roundtrip") {
     // A small fixed pseudo-random spread of world points (deterministic).
     const Vec2 points[] = {
@@ -44,8 +48,9 @@ TEST_CASE("camera_roundtrip") {
     }
 }
 
+/// @brief World +y maps above the screen centre: pixel y decreases.
 TEST_CASE("camera_y_flipped") {
-    const Camera cam;  // default: center (0,0), scale 50 (plan B.3)
+    const Camera cam;  // default: center (0,0), scale 50
     const Vec2 originPx = cam.toPixels({0.0, 0.0}, kWinW, kWinH);
     CHECK(originPx.x == Approx(kWinW / 2.0));
     CHECK(originPx.y == Approx(kWinH / 2.0));
@@ -55,6 +60,8 @@ TEST_CASE("camera_y_flipped") {
     CHECK(above.y == Approx(kWinH / 2.0 - cam.scale));
 }
 
+/// @brief zoomAt keeps the world point under the mouse fixed while the
+/// scale changes by 1.1^ticks (the anchor law).
 TEST_CASE("camera_zoom_anchor") {
     for (const double ticks : {1.0, -1.0}) {
         Camera cam;
@@ -70,6 +77,7 @@ TEST_CASE("camera_zoom_anchor") {
     }
 }
 
+/// @brief panByPixels shifts the centre by pixels/scale, y-flipped.
 TEST_CASE("camera_pan") {
     Camera cam;
     cam.center = {1.0, 1.0};
@@ -77,13 +85,14 @@ TEST_CASE("camera_pan") {
     cam.panByPixels({10.0, 0.0});
     CHECK(cam.center.x == Approx(1.0 - 10.0 / 4.0));
     CHECK(cam.center.y == Approx(1.0));
-    // y-flip: dragging down (positive dy) moves the view down in world space,
-    // i.e. center.y increases (plan D.3 / Task 8 dispatch).
+    // y-flip: dragging down (positive dy) moves the view down in world
+    // space, i.e. center.y increases.
     cam.panByPixels({0.0, 8.0});
     CHECK(cam.center.x == Approx(1.0 - 10.0 / 4.0));
     CHECK(cam.center.y == Approx(1.0 + 8.0 / 4.0));
 }
 
+/// @brief The scale stays inside [1e-3, 1e6] under bulk and per-tick zooms.
 TEST_CASE("camera_zoom_clamps") {
     {
         Camera cam;  // scale 50

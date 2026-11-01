@@ -1,3 +1,10 @@
+/// @file
+/// Tests for the public preset API (createPreset and the per-preset option
+/// functions): physics correctness of each preset (orbital periods, bounded
+/// solar orbits, exact literals), determinism and seed handling, checksum
+/// regression pins, and the option-parameter contracts (separation, scale,
+/// planet count, hyperbolic flag).
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -19,13 +26,22 @@ using Catch::Approx;
 
 namespace {
 
-// runHeadless output is compared as formatted text in determinism checks, so
-// "identical" means bitwise-identical doubles, not merely == (-0.0 vs 0.0,
-// etc. would slip through operator==).
+/// @brief Exact bitwise equality for doubles. Determinism checks compare
+/// formatted output, so "identical" must mean identical bit patterns: -0.0
+/// vs 0.0 and similar pairs would slip through operator==.
+/// @param a First double value.
+/// @param b Second double value.
+/// @return True if a and b have identical IEEE-754 bit patterns.
 bool bitsEqual(double a, double b) {
     return std::memcmp(&a, &b, sizeof(double)) == 0;
 }
 
+/// @brief True when two body vectors are element-wise bitwise identical over
+/// the physics-relevant fields (id, mass, radius, position, velocity).
+/// @param a First body vector.
+/// @param b Second body vector.
+/// @return True if the vectors have equal size and every field matches bit
+/// for bit in document order.
 bool bodiesBitwiseEqual(const std::vector<Body>& a,
                         const std::vector<Body>& b) {
     if (a.size() != b.size()) {
@@ -44,10 +60,12 @@ bool bodiesBitwiseEqual(const std::vector<Body>& a,
     return true;
 }
 
-// Pinned checksum order, mirroring HeadlessRunner: accumulate every body's x
-// component first, then every body's y, in document order. Fixing the order
-// keeps the sum's floating-point rounding deterministic, which is what the
-// determinism comparisons rely on.
+/// @brief Pinned checksum order, mirroring HeadlessRunner: accumulate every
+/// body's x component first, then every body's y, in document order. Fixing
+/// the order keeps the sum's floating-point rounding deterministic, which is
+/// what the determinism comparisons rely on.
+/// @param bodies The bodies to checksum.
+/// @return Sum of all x components followed by the sum of all y components.
 double checksumOf(const std::vector<Body>& bodies) {
     double sum = 0.0;
     for (const Body& b : bodies) {
@@ -59,9 +77,13 @@ double checksumOf(const std::vector<Body>& bodies) {
     return sum;
 }
 
-// runHeadless-style PhysicsWorld run (runHeadless itself lives in nbody_app,
-// out of reach for nbody_core_tests): RK4, `steps` steps, checksum rendered
-// with setprecision(17) exactly like the stats line.
+/// @brief A runHeadless-style PhysicsWorld run (runHeadless itself lives in
+/// nbody_app, out of reach for these core tests): RK4, `steps` steps, the
+/// checksum rendered with setprecision(17) exactly like the stats line.
+/// @param bodies The initial bodies (taken by value, moved into the world).
+/// @param cfg The world configuration to run under.
+/// @param steps Number of world steps to take.
+/// @return The final-state checksum formatted like the headless stats line.
 std::string runAndFormat(std::vector<Body> bodies, WorldConfig cfg,
                         std::uint64_t steps) {
     PhysicsWorld world{cfg, makeIntegrator(IntegratorKind::Rk4)};
@@ -76,10 +98,10 @@ std::string runAndFormat(std::vector<Body> bodies, WorldConfig cfg,
 
 }  // namespace
 
+/// @brief Mirrors rk4_orbit_period_return but through the public preset API:
+/// a preset-built two-body system must return to its start after one period,
+/// proving createPreset(TwoBody) itself, not just the hand-built fixture.
 TEST_CASE("preset_two_body_orbit_period") {
-    // Mirrors rk4_orbit_period_return (Task 5) but through the PUBLIC preset
-    // path: if this passes, createPreset(TwoBody) is right, not just the
-    // hand-written test fixture.
     SimulationSetup setup = createPreset(PresetName::TwoBody, 42);
     REQUIRE(setup.bodies.size() == 2);
 
@@ -106,11 +128,11 @@ TEST_CASE("preset_two_body_orbit_period") {
     }
 }
 
+/// @brief The Chenciner-Montgomery figure-eight, run with RK4 at dt = T/2400
+/// for one period. The orbit is a rigidly periodic solution, but comparing
+/// rotation-free removes residual phase drift: the sorted MULTISET of the
+/// three pairwise distances at t=0 and t=T must match within 5%.
 TEST_CASE("preset_figure_eight_period") {
-    // Chenciner-Montgomery figure-eight (plan C.5), RK4 at dt = T/2400. The
-    // orbit is a rigidly periodic solution, but comparing rotation-free
-    // removes any residual phase drift: compare the MULTISET of the three
-    // pairwise distances at t=0 and t=T, sorted, within 5%.
     SimulationSetup setup = createPreset(PresetName::FigureEight, 42);
     REQUIRE(setup.bodies.size() == 3);
 
@@ -128,7 +150,7 @@ TEST_CASE("preset_figure_eight_period") {
     const std::vector<double> startDists = pairwiseDistances(setup.bodies);
     REQUIRE(startDists.size() == 3);
 
-    const double tPeriod = 6.32591398;  // C.5
+    const double tPeriod = 6.32591398;  // the choreography's known period
     setup.config.timeStep = tPeriod / 2400.0;
 
     PhysicsWorld world{setup.config, makeIntegrator(IntegratorKind::Rk4)};
@@ -146,6 +168,8 @@ TEST_CASE("preset_figure_eight_period") {
     }
 }
 
+/// @brief Same seed => bitwise-identical body vectors, and two equal-length
+/// world runs from them produce identical checksum text.
 TEST_CASE("preset_cloud_determinism") {
     // Same seed => bitwise-identical body vectors ...
     const SimulationSetup a = createPreset(PresetName::RandomCloud, 7);
@@ -162,20 +186,20 @@ TEST_CASE("preset_cloud_determinism") {
           runAndFormat(b.bodies, b.config, 500));
 }
 
+/// @brief Over 2000 steps every planet stays within a bound times its
+/// initial sun-distance (no ejections) and nothing collides (compressed
+/// spacings are still >> collision radii). Run under BOTH integrators,
+/// three arms (all measured values, bodies deterministic):
+///  - RK4 at the preset dt: the 1.35 bound, with huge room (max ratio
+///    1.0001).
+///  - Euler at the preset dt: a documented looser 1.5 bound. Mercury
+///    spirals to 1.442 by step 2000 -- Euler's O(dt) energy injection IS
+///    the documented "Euler spirals outward" behaviour, so 1.35 legitimately
+///    does not hold at this dt; the system is still bounded, 0 merges.
+///  - Euler dt-converged at 1/480: the SAME 1.35 bound holds with room
+///    (max 1.040), proving the drift is a dt artifact, not an unstable
+///    preset.
 TEST_CASE("preset_solar_planets_bounded") {
-    // Spec D.2: 2000 steps; every planet must stay within a bound times its
-    // initial sun-distance (no ejections) and nothing may collide (compressed
-    // spacings are still >> collision radii). Run under BOTH integrators,
-    // three arms (all measured on this machine, bodies deterministic):
-    //  - RK4 at the preset dt: the spec's 1.35 bound, with huge room (max
-    //    ratio 1.0001).
-    //  - Euler at the preset dt: a documented looser 1.5 bound. Mercury
-    //    spirals to 1.442 by step 2000 -- Euler's O(dt) energy injection IS
-    //    the README "Euler spirals outward" demo, so 1.35 legitimately does
-    //    not hold at this dt; the system is still bounded, 0 merges.
-    //  - Euler dt-converged at 1/480: the SAME 1.35 bound holds with room
-    //    (max 1.040), proving the drift is a dt artifact, not an unstable
-    //    preset.
     SimulationSetup setup = createPreset(PresetName::SolarSystem, 42);
     REQUIRE(setup.bodies.size() == 9);
     const std::vector<Body> start = setup.bodies;
@@ -214,9 +238,10 @@ TEST_CASE("preset_solar_planets_bounded") {
     }
 }
 
+/// @brief Checks the fixed solar-system literals the preset must match: sun
+/// plus 8 planets (Mercury..Neptune) on circular orbits v = sqrt(g*M_sun/a)
+/// at fixed start angles, with per-planet appearance values.
 TEST_CASE("preset_solar_eight_bodies_circular") {
-    // Spec D.2 literals: sun + 8 planets (Mercury..Neptune), circular
-    // velocities v = sqrt(g*M_sun/a), start angles from the fixed list.
     const SimulationSetup setup = createPreset(PresetName::SolarSystem, 42);
     REQUIRE(setup.bodies.size() == 9);
 
@@ -257,22 +282,19 @@ TEST_CASE("preset_solar_eight_bodies_circular") {
         CHECK(std::fabs(dot(rel, vel)) < 1e-9 * a * vCirc);  // perpendicular
         CHECK(rel.x * vel.y - rel.y * vel.x > 0.0);          // CCW
 
-        // Per-planet appearance per spec (renderer contract, Tasks 2-3).
+        // Per-planet appearance (the renderer's contract for these bodies).
         CHECK(p.appearance.color == kColors[i]);
         CHECK(p.appearance.glow == false);
         CHECK(p.appearance.ring == (i == 5));    // Saturn only
         CHECK(p.appearance.bands == (i == 4 ? 3 : (i == 5 ? 2 : 0)));
     }
 
-    // Mass bands (T1 review minor): spec D.2's band is 1e-4..8e-3. The
-    // rocky inner planets stay tiny (floored at the 1e-4 spec floor, far
-    // below 1.0); both gas giants sit clearly above every inner planet;
-    // and the heaviest planet is Jupiter at index 4 (bodies[5]). (The
-    // review relay's literal "gas giants > 50.0" does not match the
-    // shipped band — verified against Presets.cpp — so the 10x
-    // separation ratio below is the assertion that actually holds.
-    // The 10x check covers only the four rocky planets; Uranus/Neptune
-    // are within 10x of Saturn (~5.6x) by design.)
+    // Mass band under test: 1e-4..8e-3. The rocky inner planets stay tiny
+    // (floored at 1e-4, far below 1.0); both gas giants sit clearly above
+    // every inner planet; and the heaviest planet is Jupiter at index 4
+    // (bodies[5]). The 10x separation checks below cover only the four
+    // rocky planets; Uranus/Neptune are within 10x of Saturn (~5.6x) by
+    // design, so a fixed "gas giants > N" threshold is not asserted.
     for (int i = 0; i < 4; ++i) {
         CAPTURE(i);
         const double m = setup.bodies[static_cast<std::size_t>(i) + 1].mass;
@@ -298,6 +320,8 @@ TEST_CASE("preset_solar_eight_bodies_circular") {
     CHECK(heaviest == 5);  // bodies[5] == planets[4] == Jupiter
 }
 
+/// @brief The solar preset is seed-free: the seed argument must not reach any
+/// RNG, so different seeds give identical setups including appearances.
 TEST_CASE("preset_solar_no_rng") {
     // The solar preset must stay seed-free: two different seeds produce the
     // exact same setup, body-for-body, including appearance.
@@ -318,6 +342,8 @@ TEST_CASE("preset_solar_no_rng") {
     CHECK(bitsEqual(a.config.timeStep, b.config.timeStep));
 }
 
+/// @brief Every preset yields a physically valid setup: nonempty, positive
+/// masses and radii, finite state, and ids 1..N in document order.
 TEST_CASE("preset_presets_valid") {
     const std::pair<const char*, PresetName> all[] = {
         {"two-body", PresetName::TwoBody},
@@ -345,15 +371,15 @@ TEST_CASE("preset_presets_valid") {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1 (preset-option-menus): signed seeds + per-preset option parameters.
+// Preset option parameters: signed (int64) seeds and per-preset options.
 // ---------------------------------------------------------------------------
 
 namespace {
 
-// Literal 500-step RK4 checksums captured from the pre-change binary (main @
-// 7ca1dfa) via `nbody --preset=<p> --headless=500` -- the same stats line
-// runAndFormat() emulates. These pin the DEFAULT setups byte-for-byte: any
-// drift in the new option parameters' default paths fails here.
+// Literal 500-step RK4 checksums captured from the baseline binary via
+// `nbody --preset=<p> --headless=500` -- the same stats line runAndFormat()
+// emulates. These pin the DEFAULT setups byte-for-byte: any drift in the
+// option parameters' default paths fails here.
 constexpr const char* kPinCloudSeed42 = "44.930828866170515";
 constexpr const char* kPinCloudSeed7 = "-27.350832960581805";
 constexpr const char* kPinTwoBody = "0";
@@ -362,11 +388,11 @@ constexpr const char* kPinSolar = "-138.09795158656254";
 
 }  // namespace
 
+/// @brief Regression anchors: the no-option call paths must stay
+/// bit-identical to the pre-option code. The 100k-step cloud anchor
+/// (5.5936610862797043) is verified against the built binary; these 500-step
+/// pins cover the same RNG streams in CI.
 TEST_CASE("preset_checksum_pins_default_paths") {
-    // Anchor regressions (spec D.3/D.8): the no-option call paths must stay
-    // bit-identical to main. The 100k-step cloud anchor
-    // (5.5936610862797043) is verified against the built binary in the task
-    // report; these 500-step pins cover the same streams in CI.
     const SimulationSetup cloud42 = randomCloud(42);
     CHECK(runAndFormat(cloud42.bodies, cloud42.config, 500) ==
           kPinCloudSeed42);
@@ -395,9 +421,10 @@ TEST_CASE("preset_checksum_pins_default_paths") {
           kPinSolar);
 }
 
+/// @brief The seed-folding law: a seed in [0, 2^32) maps to itself (so
+/// historical streams are unchanged); everything else goes through the
+/// splitmix64 fold.
 TEST_CASE("preset_seed_fold_law") {
-    // Spec D.3 fold: seed in [0, 2^32) maps to itself (historical streams
-    // unchanged); everything else goes through the splitmix64 fold.
     CHECK(foldSeed(0) == 0U);
     CHECK(foldSeed(42) == 42U);
     CHECK(foldSeed(7) == 7U);
@@ -411,8 +438,11 @@ TEST_CASE("preset_seed_fold_law") {
     CHECK(foldSeed(INT64_C(4294967296)) != 0U);
 }
 
+/// @brief Negative and out-of-range seeds stay deterministic: equal seeds
+/// give bitwise-equal setups, different seeds differ, and a run under a seed
+/// equals the run under its folded u32 (the engine is mt19937(foldSeed(s))).
 TEST_CASE("preset_seed_negative_and_big_determinism") {
-    // createPreset(RandomCloud, -1) twice equal, != seed 1 (brief).
+    // createPreset(RandomCloud, -1) twice equal, != seed 1.
     const SimulationSetup a = createPreset(PresetName::RandomCloud, -1);
     const SimulationSetup b = createPreset(PresetName::RandomCloud, -1);
     REQUIRE(!a.bodies.empty());
@@ -441,6 +471,9 @@ TEST_CASE("preset_seed_negative_and_big_determinism") {
               c.config, 500));
 }
 
+/// @brief The cloud's RNG stream is consumed per body in a fixed order, so
+/// the first N bodies of a larger cloud equal a smaller cloud bitwise, at
+/// any count and including the default.
 TEST_CASE("preset_cloud_prefix_contract") {
     // First 150 of (s, 2000) == all of (s, 150), bitwise: the shared RNG
     // stream is consumed in the same per-body order regardless of count.
@@ -459,6 +492,8 @@ TEST_CASE("preset_cloud_prefix_contract") {
         randomCloud(7, 100).bodies));
 }
 
+/// @brief The cloud body count clamps into [2, 2000], and the clamped-to-2
+/// output is still a valid prefix of the same seed's larger cloud.
 TEST_CASE("preset_cloud_count_clamps") {
     CHECK(randomCloud(7, 0).bodies.size() == 2);
     CHECK(randomCloud(7, 1).bodies.size() == 2);
@@ -472,6 +507,9 @@ TEST_CASE("preset_cloud_count_clamps") {
                              {big.bodies.begin(), big.bodies.begin() + 2}));
 }
 
+/// @brief The two-body separation option scales positions by sep/10 and
+/// re-derives circular velocities for the new scale, leaving masses, radii,
+/// ids, and orientation untouched; the default path stays bitwise unchanged.
 TEST_CASE("preset_two_body_separation_scale") {
     const SimulationSetup def = twoBody(0);
     REQUIRE(def.bodies.size() == 2);
@@ -506,6 +544,9 @@ TEST_CASE("preset_two_body_separation_scale") {
                              createPreset(PresetName::TwoBody, 0).bodies));
 }
 
+/// @brief The hyperbolic flag keeps the orbital geometry but multiplies the
+/// circular speed by 1.6, making the pair unbound (total energy > 0, since
+/// 1.6^2 = 2.56 exceeds the equal-mass escape ratio of 2).
 TEST_CASE("preset_two_body_hyperbolic") {
     const SimulationSetup orb = twoBody(0);
     const SimulationSetup hyp = twoBody(0, 10.0, true);
@@ -544,6 +585,10 @@ TEST_CASE("preset_two_body_hyperbolic") {
           Approx(1.6 * 0.5 / std::sqrt(2.0)).epsilon(1e-12));
 }
 
+/// @brief The figure-eight scale option exploits Keplerian self-similarity:
+/// positions scale by k and velocities by 1/sqrt(k) (G fixed, so a scaled
+/// copy runs on a time axis multiplied by k^1.5), keeping the choreography's
+/// shape exactly.
 TEST_CASE("preset_figure_eight_scale") {
     const SimulationSetup def = figureEight(0);
     REQUIRE(def.bodies.size() == 3);
@@ -552,9 +597,9 @@ TEST_CASE("preset_figure_eight_scale") {
         def.bodies, createPreset(PresetName::FigureEight, 0).bodies));
 
     // figureEight(scale=3): positions x3, velocities /sqrt(3) (Keplerian
-    // self-similarity: G fixed => scaled copy runs on a time axis xk^1.5;
-    // the old x sqrt(3) of spec D.2's literal drifts), bitwise against the
-    // same scalar ops applied to the default velocities.
+    // self-similarity: G fixed => a scaled copy by k runs on a time axis
+    // xk^1.5; scaling velocities UP by sqrt(k) instead would drift),
+    // bitwise against the same scalar ops applied to the default velocities.
     const SimulationSetup s3 = figureEight(0, 3.0);
     REQUIRE(s3.bodies.size() == 3);
     const double k = std::sqrt(3.0);
@@ -572,11 +617,11 @@ TEST_CASE("preset_figure_eight_scale") {
         CHECK(bitsEqual(s3.bodies[i].radius, def.bodies[i].radius));
     }
 
-    // Long-run shape evidence (review ruling, replaces the x sqrt(k) drift):
-    // 5000 RK4 steps (dt = 1/120) at scale=3 vs the default run. Measured:
-    // default pairwise band [0.690467, 2.00025], scale3 [2.07137, 6.00067]
-    // = exactly 3x, identical dimensionless band ratio 2.53174; all finite,
-    // zero merges. Assert bounded + that scaled equivalence.
+    // Long-run shape evidence: 5000 RK4 steps (dt = 1/120) at scale=3 vs
+    // the default run. Measured: default pairwise band [0.690467, 2.00025],
+    // scale3 [2.07137, 6.00067] = exactly 3x, identical dimensionless band
+    // ratio 2.53174; all finite, zero merges. Assert bounded + that scaled
+    // equivalence.
     struct Band {
         double lo;
         double hi;
@@ -626,6 +671,9 @@ TEST_CASE("preset_figure_eight_scale") {
           Approx(dBand.hi / dBand.lo).epsilon(0.01));
 }
 
+/// @brief Solar option contracts: the planet count trims the system as an
+/// inside-out prefix (clamped to [0, 8], 0 = sun only), and the Pluto flag
+/// appends a 10th body on a circular orbit only at the full 8-planet system.
 TEST_CASE("preset_solar_planet_count_and_pluto") {
     const SimulationSetup full = solarSystem(0);
     REQUIRE(full.bodies.size() == 9);

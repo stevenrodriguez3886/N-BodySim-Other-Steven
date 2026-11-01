@@ -1,3 +1,7 @@
+/// @file test_menu_model.cpp
+/// @brief Menu model tests: live vs staged application, restart semantics,
+/// option setters and mirrors, group visibility matrices, tick indices,
+/// staged summaries, and tooltip coverage.
 #include "nbody/app/MenuModel.hpp"
 #include "nbody/app/TextField.hpp"
 
@@ -37,12 +41,13 @@ using nbody::core::PresetName;
 
 namespace {
 
-// Simulation is a fixed 6-row table (spec D.1 rework): 0-3 presets, 4
-// separator, 5 restart — the preset option rows live in Options now.
+// Simulation is a fixed 6-row table: 0-3 presets, 4 separator, 5 restart;
+// the preset option rows live in the Options group.
 constexpr int kRestartRow = 5;
 
 }  // namespace
 
+/// @brief Live clicks apply preset, integrator, and dt immediately.
 TEST_CASE("model_apply_live_preset_and_other_live_effects") {
     MenuState state;
     REQUIRE(menuApply(state, {MenuGroup::Simulation, 1}, false) ==
@@ -54,8 +59,8 @@ TEST_CASE("model_apply_live_preset_and_other_live_effects") {
     REQUIRE(menuApply(state, {MenuGroup::Physics, 2}, false) ==
             MenuEffect::DtChanged);
     REQUIRE(state.dt == 1.0 / 120.0);
-    // The Cloud rows are fields/roll buttons wired app-side (Task 4):
-    // menuApply never mutates the seed or bodies through a row click.
+    // The Cloud rows are fields/roll buttons wired app-side: menuApply
+    // never mutates the seed or bodies through a row click.
     REQUIRE(menuApply(state, {MenuGroup::Cloud, 0}, false) == MenuEffect::None);
     REQUIRE(menuApply(state, {MenuGroup::Cloud, 1}, false) == MenuEffect::None);
     REQUIRE(menuApply(state, {MenuGroup::Cloud, 2}, false) == MenuEffect::None);
@@ -66,6 +71,7 @@ TEST_CASE("model_apply_live_preset_and_other_live_effects") {
     REQUIRE(menuStaged(state).empty());
 }
 
+/// @brief While paused, clicks stage values instead of mutating state.
 TEST_CASE("model_apply_stages_while_paused") {
     MenuState state;
     REQUIRE(menuApply(state, {MenuGroup::Simulation, 3}, true) ==
@@ -78,6 +84,7 @@ TEST_CASE("model_apply_stages_while_paused") {
     REQUIRE(menuStaged(state).integrator == IntegratorKind::Euler);
 }
 
+/// @brief Staging the same field twice keeps the most recent value.
 TEST_CASE("model_stage_last_write_wins") {
     MenuState state;
     REQUIRE(menuApply(state, {MenuGroup::Simulation, 1}, true) ==
@@ -87,6 +94,7 @@ TEST_CASE("model_stage_last_write_wins") {
     REQUIRE(menuStaged(state).preset == PresetName::RandomCloud);
 }
 
+/// @brief menuTakeStaged returns the staged values and clears them.
 TEST_CASE("model_take_staged_returns_and_clears_staged_values") {
     MenuState state;
     REQUIRE(menuApply(state, {MenuGroup::Physics, 3}, true) ==
@@ -99,6 +107,7 @@ TEST_CASE("model_take_staged_returns_and_clears_staged_values") {
     REQUIRE(menuTakeStaged(state).empty());
 }
 
+/// @brief Restart acts immediately even while paused.
 TEST_CASE("model_restart_applies_while_paused") {
     MenuState state;  // restart sits at the fixed Simulation row 5.
     REQUIRE(menuApply(state, {MenuGroup::Simulation, kRestartRow}, true) ==
@@ -107,6 +116,7 @@ TEST_CASE("model_restart_applies_while_paused") {
     REQUIRE(menuStaged(state).empty());
 }
 
+/// @brief A paused restart leaves the staged values untouched.
 TEST_CASE("model_restart_while_paused_preserves_staged") {
     MenuState state;
     REQUIRE(menuApply(state, {MenuGroup::Simulation, 3}, true) ==
@@ -129,6 +139,7 @@ TEST_CASE("model_restart_while_paused_preserves_staged") {
     CHECK(menuStaged(state).seed == 1234);
 }
 
+/// @brief menuSetSeed writes live or staged, last-write-wins.
 TEST_CASE("model_set_seed_live_and_staged") {
     MenuState state;
     REQUIRE(menuSetSeed(state, 777, false) == MenuEffect::SeedChanged);
@@ -147,8 +158,9 @@ TEST_CASE("model_set_seed_live_and_staged") {
     REQUIRE(menuTickedIndex(state, MenuGroup::Cloud) == -1);
 }
 
-// Spec D.3: seeds are signed int64; the model stores exactly what it is
-// given. Negative seeds must pass through in both paths.
+/// @brief Negative seed values pass through both paths unchanged.
+// Seeds are signed int64 and the model stores exactly what it is given.
+// Negative seeds must pass through in both paths.
 TEST_CASE("model_seed_accepts_negative") {
     MenuState state;
     REQUIRE(menuSetSeed(state, -5, false) == MenuEffect::SeedChanged);
@@ -158,6 +170,7 @@ TEST_CASE("model_seed_accepts_negative") {
     REQUIRE(state.seed == -5);
 }
 
+/// @brief A zero seed is stored exactly, live and staged.
 // The model stores exactly what it is given (no clamping). Boundary values
 // must pass through in both paths; saturation-at-parse is app-side.
 TEST_CASE("model_seed_set_stores_zero") {
@@ -168,6 +181,7 @@ TEST_CASE("model_seed_set_stores_zero") {
     REQUIRE(menuStaged(state).seed == 0);
 }
 
+/// @brief int64 extreme values pass through the setters unclamped.
 TEST_CASE("model_seed_set_stores_extremes") {
     constexpr auto maxSeed = std::numeric_limits<std::int64_t>::max();
     constexpr auto minSeed = std::numeric_limits<std::int64_t>::min();
@@ -185,6 +199,7 @@ TEST_CASE("model_seed_set_stores_extremes") {
     REQUIRE(menuStaged(stagedState).seed == maxSeed);
 }
 
+/// @brief An off-list dt ticks no row until a menu value is applied.
 TEST_CASE("model_offlist_dt_has_no_tick_until_a_menu_value_is_applied") {
     MenuState state;
     state.dt = 5.0;
@@ -195,6 +210,7 @@ TEST_CASE("model_offlist_dt_has_no_tick_until_a_menu_value_is_applied") {
     REQUIRE(menuTickedIndex(state, MenuGroup::Physics) == 0);
 }
 
+/// @brief The staged summary lists groups in the contract order.
 TEST_CASE("model_staged_summary_lists_groups_in_contract_order") {
     MenuState state;
     REQUIRE(menuApply(state, {MenuGroup::Simulation, 3}, true) ==
@@ -206,8 +222,9 @@ TEST_CASE("model_staged_summary_lists_groups_in_contract_order") {
             std::string("preset → figure-eight, dt → 1/240"));
 }
 
-// ---- Task 3: visibility, row tables, option setters, summary clauses ----
+// ---- Visibility, row tables, option setters, summary clauses ----
 
+/// @brief Group visibility and row counts switch with the preset.
 TEST_CASE("model_visibility_matrix_two_presets_x_four_groups") {
     MenuState state;  // preset two-body
     REQUIRE(menuGroupVisible(MenuGroup::Simulation, state));
@@ -224,10 +241,11 @@ TEST_CASE("model_visibility_matrix_two_presets_x_four_groups") {
     REQUIRE(menuItemCount(MenuGroup::Cloud, state) == 4);
 }
 
+/// @brief Option counts, the fixed Simulation rows, and out-of-range guards.
 TEST_CASE("model_preset_option_counts_and_simulation_row_tables") {
-    // Option rows per preset (spec D.1/D.2): two-body 2, solar 2, cloud 0,
-    // figure-eight 1 — they live in the Options group. Simulation is the
-    // fixed 6-row table: 4 presets, separator, restart.
+    // Option rows per preset: two-body 2, solar 2, cloud 0, figure-eight
+    // 1 — they live in the Options group. Simulation is the fixed 6-row
+    // table: 4 presets, separator, restart.
     REQUIRE(menuPresetOptionCount(PresetName::TwoBody) == 2);
     REQUIRE(menuPresetOptionCount(PresetName::SolarSystem) == 2);
     REQUIRE(menuPresetOptionCount(PresetName::RandomCloud) == 0);
@@ -271,6 +289,7 @@ TEST_CASE("model_preset_option_counts_and_simulation_row_tables") {
     }
 }
 
+/// @brief Simulation rows are preset names, a separator, and restart only.
 TEST_CASE("Simulation rows are presets + separator + restart only") {
     MenuState s; s.preset = PresetName::SolarSystem;
     for (int i = 0; i < 4; ++i)
@@ -291,6 +310,7 @@ TEST_CASE("Simulation rows are presets + separator + restart only") {
     }
 }
 
+/// @brief Options rows carry the option labels, effects, and tooltips.
 TEST_CASE("Options rows carry the preset option labels and effects") {
     MenuState s; s.preset = PresetName::SolarSystem; s.planetCount = 5;
     CHECK(menuItemLabel(s, MenuGroup::Options, 0) == "planets: 5");
@@ -304,7 +324,7 @@ TEST_CASE("Options rows carry the preset option labels and effects") {
           MenuEffect::PathChanged);
     // Toggle state lives in the labels, never in a tick row.
     CHECK(menuTickedIndex(s, MenuGroup::Options) == -1);
-    // Tooltips ride along with the moved rows (spec D.6 strings).
+    // Tooltips ride along with the option rows.
     CHECK(menuItemTooltip(MenuGroup::Options, 0,
                           s) == "Distance between the bodies at t=0");
     CHECK(menuItemTooltip(MenuGroup::Options, 1, s) ==
@@ -316,6 +336,7 @@ TEST_CASE("Options rows carry the preset option labels and effects") {
           "Include Pluto at ~200 units");
 }
 
+/// @brief Paused option toggles flip the staged value, last-write-wins.
 TEST_CASE("Options toggles keep the staging law") {
     MenuState s; s.preset = PresetName::SolarSystem;
     CHECK(menuApply(s, {MenuGroup::Options, 1}, true) == MenuEffect::Staged);
@@ -324,6 +345,7 @@ TEST_CASE("Options toggles keep the staging law") {
     CHECK(menuStaged(s).pluto == false);  // flip vs staged, last-write-wins
 }
 
+/// @brief The separation/planets fields belong to the Options group.
 TEST_CASE("fields moved to Options") {
     CHECK(fieldForItem(MenuGroup::Options, 0, PresetName::SolarSystem) ==
           TextField::Planets);
@@ -337,10 +359,10 @@ TEST_CASE("fields moved to Options") {
     CHECK(menuGroupOfField(TextField::Seed) == MenuGroup::Cloud);
 }
 
+/// @brief Physics rows 5+ never act: the group is the plain dt list.
 TEST_CASE("model_physics_lost_restart") {
     MenuState state;
-    // Physics is the plain 5-row dt list now: the old separator (5) and
-    // restart (6) rows are gone; only dt rows 0-4 act.
+    // Physics is a plain 5-row dt list: only dt rows 0-4 act.
     REQUIRE(menuApply(state, {MenuGroup::Physics, 4}, false) ==
             MenuEffect::DtChanged);
     REQUIRE(state.dt == 1.0 / 480.0);
@@ -351,6 +373,7 @@ TEST_CASE("model_physics_lost_restart") {
     REQUIRE(state.restartTick == 0);
 }
 
+/// @brief The path toggle works by row click or setter, live or staged.
 TEST_CASE("model_toggle_path_row_and_setter") {
     MenuState state;  // two-body default
     REQUIRE(state.hyperbolic == false);
@@ -378,6 +401,7 @@ TEST_CASE("model_toggle_path_row_and_setter") {
     REQUIRE(menuStaged(state).empty());
 }
 
+/// @brief The pluto toggle works by row click or setter, live or staged.
 TEST_CASE("model_toggle_pluto_row_and_setter") {
     MenuState state;
     state.preset = PresetName::SolarSystem;
@@ -399,9 +423,10 @@ TEST_CASE("model_toggle_pluto_row_and_setter") {
     REQUIRE(menuStaged(state).empty());
 }
 
+/// @brief Field rows never mutate state through menuApply.
 TEST_CASE("model_option_field_rows_do_not_act_through_menuApply") {
     // Options row 0 (separation/planets) focuses the inline editor
-    // app-side (Task 4); menuApply itself never mutates.
+    // app-side; menuApply itself never mutates.
     MenuState state;
     REQUIRE(menuApply(state, {MenuGroup::Options, 0}, false) ==
             MenuEffect::None);
@@ -417,6 +442,7 @@ TEST_CASE("model_option_field_rows_do_not_act_through_menuApply") {
     REQUIRE(menuStaged(state).empty());
 }
 
+/// @brief menuSetBodies writes live or staged, last-write-wins.
 TEST_CASE("model_set_bodies_live_and_staged") {
     MenuState state;
     REQUIRE(state.bodies == 150);
@@ -436,6 +462,7 @@ TEST_CASE("model_set_bodies_live_and_staged") {
     REQUIRE(menuStaged(state).empty());
 }
 
+/// @brief menuSetSeparation writes live or staged within the range.
 TEST_CASE("model_set_separation_live_and_staged") {
     MenuState state;
     REQUIRE(state.separation == 10.0);
@@ -452,6 +479,7 @@ TEST_CASE("model_set_separation_live_and_staged") {
     REQUIRE(menuStaged(state).separation == 500.0);
 }
 
+/// @brief menuSetPlanets writes live or staged, last-write-wins.
 TEST_CASE("model_set_planets_live_and_staged") {
     MenuState state;
     REQUIRE(state.planetCount == 8);
@@ -467,6 +495,7 @@ TEST_CASE("model_set_planets_live_and_staged") {
     REQUIRE(menuStaged(state).planets == 8);
 }
 
+/// @brief Staged option mirrors survive a take and count as staged activity.
 TEST_CASE("model_take_staged_carries_option_mirrors") {
     MenuState state;
     REQUIRE(menuSetSeparation(state, 25.0, true) == MenuEffect::Staged);
@@ -486,6 +515,7 @@ TEST_CASE("model_take_staged_carries_option_mirrors") {
     REQUIRE(menuIsStagedActive(state));
 }
 
+/// @brief Each staged option renders its documented summary clause.
 TEST_CASE("model_staged_summary_option_clauses") {
     {
         MenuState state;
@@ -523,6 +553,7 @@ TEST_CASE("model_staged_summary_option_clauses") {
     }
 }
 
+/// @brief The full summary lists every staged value in contract order.
 TEST_CASE("model_staged_summary_full_contract_order") {
     // preset → integrator → dt → seed → bodies → separation → path →
     // planets → pluto (mirrors the Space-resume consumption order).
@@ -552,6 +583,7 @@ TEST_CASE("model_staged_summary_full_contract_order") {
                         "planets → 5, pluto → on"));
 }
 
+/// @brief Tick indices track the live preset across the groups.
 TEST_CASE("model_ticked_indices_with_renamed_groups") {
     MenuState state;
     REQUIRE(menuTickedIndex(state, MenuGroup::Simulation) == 0);
@@ -563,11 +595,12 @@ TEST_CASE("model_ticked_indices_with_renamed_groups") {
     REQUIRE(menuTickedIndex(state, MenuGroup::Simulation) == 1);
 }
 
+/// @brief Every header and every visible non-separator row has a tooltip.
 TEST_CASE("every visible header and row has a tooltip") {
-    // Tooltips-everywhere law (spec D.6 / design goal 1): every header of
-    // every group and every non-separator row of every VISIBLE group
-    // carries a non-empty tooltip, on every preset. Only the Simulation
-    // separator (row 4) stays empty.
+    // Tooltips-everywhere law: every header of every group and every
+    // non-separator row of every VISIBLE group carries a non-empty
+    // tooltip, on every preset. Only the Simulation separator (row 4)
+    // stays empty.
     for (const PresetName preset :
          {PresetName::TwoBody, PresetName::SolarSystem,
           PresetName::RandomCloud, PresetName::FigureEight}) {

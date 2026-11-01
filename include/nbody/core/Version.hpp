@@ -1,4 +1,6 @@
-#pragma once
+/// @file
+/// Reserved core header: it currently declares nothing, and exists so the
+/// nbody_core library always has a public header directory of its own. The
+/// real physics API lives in the sibling headers under nbody/core/.
 
-// Placeholder header so the nbody_core header directory exists (Task 1).
-// Real core headers arrive in Task 2.
+#pragma once

@@ -1,3 +1,10 @@
+/// @file
+/// The pure half of the inline menu editors: per-field grammars, the
+/// caret/selection mutators, paste sanitizing, commit parsing, and the
+/// row-to-field mapping. Every mutator builds a trial buffer, trims
+/// leading zeros, and grammar-checks the RESULT: a rejected mutation
+/// leaves buffer, caret, and anchor completely untouched.
+
 #include "nbody/app/TextField.hpp"
 
 #include <cmath>
@@ -9,12 +16,17 @@
 namespace nbody::app {
 namespace {
 
+/// @brief The input grammar of one editable field.
 struct FieldTraits {
-    int maxChars;       // buffer length cap (D.4)
-    bool allowSign;     // leading '-' (seed only)
-    bool allowDot;      // at most one '.' (separation only)
+    int maxChars;   ///< Buffer length cap (also the paste cap).
+    bool allowSign; ///< Leading '-' allowed (seed only).
+    bool allowDot;  ///< At most one '.' allowed (separation only).
 };
 
+/// @brief The grammar table: seed 19 signed chars, bodies 4 digits,
+/// separation 7 dotted digits, planets a single digit.
+/// @param field The field whose grammar is sought.
+/// @return The field's character cap and sign/dot allowances.
 constexpr FieldTraits traitsFor(TextField field) {
     switch (field) {
         case TextField::Seed:
@@ -29,9 +41,12 @@ constexpr FieldTraits traitsFor(TextField field) {
     return {0, false, false};
 }
 
-// Mirror of MenuModel.cpp's formatNumber (shortest honest rendering):
-// integers print bare, fractional values use 4 significant digits. Kept
-// local (the model's copy is file-static); the two render the same values.
+/// @brief Mirror of MenuModel.cpp's formatNumber (shortest honest
+/// rendering): integers print bare, fractional values use 4 significant
+/// digits. Kept local (the model's copy is file-static); the two render
+/// the same values.
+/// @param value The number to render.
+/// @return The display text.
 std::string formatNumber(double value) {
     if (std::isfinite(value) && value == std::floor(value) &&
         std::fabs(value) < 1e15) {
@@ -42,12 +57,13 @@ std::string formatNumber(double value) {
     return out.str();
 }
 
-// Collapse a run of leading zeros to a single "0" (today's seed-editor
-// law), keeping markers: "-0005" -> "-5", "000" -> "0", "-000" -> "-0"
-// (the sign survives so a later digit stays negative), "-" -> "-"
-// (untouched, zero run absent), "0." -> "0." (one zero before a dot).
-// The At-variant also reports the erased run [dropStart, dropStart +
-// dropCount) so caret-model callers can map indices through the trim.
+/// @brief Collapse a leading-zero run to a single "0", keeping markers:
+/// "-0005" -> "-5", "000" -> "0", "-000" -> "-0" (the sign survives so a
+/// later digit stays negative), "-" -> "-" (untouched, zero run absent),
+/// "0." -> "0." (one zero before a dot).
+/// @param buffer The text to trim in place.
+/// @param dropStart Out: start of the erased run; nullptr to ignore.
+/// @param dropCount Out: characters erased; nullptr to ignore.
 void trimLeadingZerosAt(std::string& buffer, std::size_t* dropStart,
                         std::size_t* dropCount) {
     if (dropStart != nullptr) {
@@ -80,12 +96,19 @@ void trimLeadingZerosAt(std::string& buffer, std::size_t* dropStart,
     }
 }
 
+/// @brief Trim leading zeros without reporting the erased run.
+/// @param buffer The text to trim in place.
 void trimLeadingZeros(std::string& buffer) {
     trimLeadingZerosAt(buffer, nullptr, nullptr);
 }
 
-// Map a caret index through a trim drop: positions at or before the drop
-// start are unchanged, later ones shift left by the dropped count.
+/// @brief Map a text index through a trim drop: positions at or before
+/// the drop start are unchanged, later ones shift left by the dropped
+/// count.
+/// @param index The index in the pre-trim string.
+/// @param dropStart Start of the erased run.
+/// @param dropCount Number of characters erased.
+/// @return The index's position in the trimmed string.
 std::size_t adjustThroughDrops(std::size_t index, std::size_t dropStart,
                                std::size_t dropCount) {
     if (index <= dropStart) {
@@ -94,11 +117,14 @@ std::size_t adjustThroughDrops(std::size_t index, std::size_t dropStart,
     return index - std::min(dropCount, index - dropStart);
 }
 
-// Grammar gate over COMPLETE strings: exactly the laws fieldAppendChar
-// enforces one char at a time (digit anywhere; '-' only at buffer
-// position 0 for signed fields; at most one '.' for dotted fields; no
-// other characters; length cap). Leading-zero runs are the trim law's
-// job, not this gate's: callers trim before checking.
+/// @brief Grammar gate over COMPLETE strings: exactly the laws
+/// fieldAppendChar enforces one char at a time (digit anywhere; '-' only
+/// at buffer position 0 for signed fields; at most one '.' for dotted
+/// fields; no other characters; length cap). Leading-zero runs are the
+/// trim law's job, not this gate's: callers trim before checking.
+/// @param field The field whose grammar applies.
+/// @param text The complete candidate string.
+/// @return True when text satisfies the field's grammar.
 bool grammarOk(TextField field, const std::string& text) {
     const FieldTraits traits = traitsFor(field);
     if (text.size() > static_cast<std::size_t>(traits.maxChars)) {
@@ -129,6 +155,12 @@ bool grammarOk(TextField field, const std::string& text) {
 
 }  // namespace
 
+/// @brief Append-grammar helper: append ch to buffer when the result
+/// stays grammar-valid (used by the paste sanitizer's per-char loop).
+/// @param field The field whose grammar applies.
+/// @param ch The candidate character.
+/// @param buffer The text to append to, mutated on acceptance.
+/// @return True when ch was accepted and appended.
 static bool fieldAppendChar(TextField field, char ch, std::string& buffer) {
     const FieldTraits traits = traitsFor(field);
     const bool digit = ch >= '0' && ch <= '9';
@@ -139,7 +171,7 @@ static bool fieldAppendChar(TextField field, char ch, std::string& buffer) {
         return false;
     }
     if (buffer.size() >= static_cast<std::size_t>(traits.maxChars)) {
-        return false;  // overflow rule shared with the paste filter (D.4)
+        return false;  // overflow rule shared with the paste filter
     }
     std::string trial = buffer;
     trial.push_back(ch);
@@ -181,6 +213,8 @@ bool fieldInsertChar(TextField field, char ch, FieldText& text) {
     if (!grammarOk(field, trial)) {
         return false;  // buffer, caret AND anchor stay completely untouched
     }
+    // The caret wants the position after the insert in the TRIMMED text:
+    // map insertAt + 1 through whatever the trim erased.
     const std::size_t caret =
         adjustThroughDrops(insertAt + 1, dropStart, dropCount);
     text.buffer = std::move(trial);
@@ -293,15 +327,15 @@ std::int64_t fieldParseSeed(const std::string& buffer) {
 
 std::uint32_t fieldParseBodies(const std::string& buffer) {
     if (buffer.empty()) {
-        return 0;  // core clamps to the floor 2 (spec D.3)
+        return 0;  // core clamps the count up to the floor 2
     }
     const long long value = std::strtoll(buffer.c_str(), nullptr, 10);
     return static_cast<std::uint32_t>(value);
 }
 
 double fieldParseSeparation(const std::string& buffer) {
-    // Field range clamp (spec D.2/D.3: [0.5, 500]) lives HERE: neither the
-    // model setters nor twoBody clamp it. Empty commits the floor 0.5,
+    // Field range clamp ([0.5, 500]) lives HERE: neither the model
+    // setters nor twoBody clamp it. Empty commits the floor 0.5,
     // mirroring bodies' empty -> 0 -> core-floor-2 story.
     double value = 0.0;
     if (!buffer.empty() && buffer != ".") {
@@ -348,7 +382,7 @@ std::optional<TextField> fieldForItem(MenuGroup group, int index,
             }
             return std::nullopt;  // random seed / random bodies are buttons
         case MenuGroup::Simulation:
-            // Presets, separator, restart only (spec D.1): no field rows.
+            // Presets, separator, restart only: no field rows here.
             return std::nullopt;
         case MenuGroup::Options:
             if (index != 0) {
@@ -361,7 +395,7 @@ std::optional<TextField> fieldForItem(MenuGroup group, int index,
                 case core::PresetName::SolarSystem:
                     return TextField::Planets;
                 case core::PresetName::RandomCloud:
-                    break;  // no option rows (D.2)
+                    break;  // random-cloud contributes no option rows
             }
             return std::nullopt;
         case MenuGroup::Integrator:

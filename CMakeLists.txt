@@ -21,17 +21,15 @@ if(NOT SFML_FOUND)
   FetchContent_MakeAvailable(SFML)
 endif()
 
-# nbody_core: real STATIC library (first source landed in Task 3).
 # nbody_core MUST NOT link anything (incl. SFML). Enforced: no link line here.
 add_library(nbody_core STATIC src/core/GravityField.cpp src/core/EulerIntegrator.cpp
   src/core/Rk4Integrator.cpp src/core/PhysicsWorld.cpp src/core/Presets.cpp)
 target_include_directories(nbody_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(nbody_core PUBLIC cxx_std_17)
 
-# Task 1 scaffolded nbody_app as an INTERFACE placeholder; Task 7 converts it
-# to a real STATIC library. SFML is PRIVATE per plan section A: app consumers
-# get nbody_core transitively but no SFML link/include leak (the nbody exe
-# names its own SFML links below).
+# nbody_app: the SFML-facing application layer as a STATIC library. SFML is
+# linked PRIVATE: app consumers get nbody_core transitively but no
+# SFML link/include leak (the nbody exe names its own SFML links below).
 add_library(nbody_app STATIC src/app/AppArgs.cpp src/app/HeadlessRunner.cpp
   src/app/Camera.cpp src/app/StepPlanning.cpp src/app/MenuBar.cpp
   src/app/MenuModel.cpp src/app/SimulationApp.cpp src/app/Starfield.cpp

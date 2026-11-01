@@ -1,3 +1,9 @@
+/// @file
+/// Implementation of SimulationApp: the fixed-timestep loop, the full
+/// SFML 3 event routing (menus, inline field editing with clipboard
+/// support, camera pan/zoom), the planet-style body renderer, and the
+/// title-bar stats readout.
+
 #include "nbody/app/SimulationApp.hpp"
 
 #include <SFML/Window/Clipboard.hpp>
@@ -19,13 +25,15 @@
 
 namespace {
 
-// The single core::Vec2 -> sf::Vector2f conversion point (plan B.3 note:
-// deliberately NOT in Camera.hpp, which stays SFML-free).
+/// @brief The single core::Vec2 -> sf::Vector2f conversion point.
+/// Deliberately lives here, not in Camera.hpp, which stays SFML-free.
+/// @param v The world-space vector to convert.
+/// @return The same coordinates as single-precision SFML coordinates.
 sf::Vector2f toSf(const nbody::core::Vec2& v) {
     return sf::Vector2f{static_cast<float>(v.x), static_cast<float>(v.y)};
 }
 
-// Fixed 8-color body palette, indexed body.id % 8 (plan D.3).
+// Fixed 8-color body palette, indexed by body.id % 8.
 constexpr sf::Color kBodyPalette[8]{
     sf::Color(255, 200, 80),  sf::Color(120, 200, 255),
     sf::Color(255, 130, 90),  sf::Color(150, 255, 160),
@@ -43,18 +51,23 @@ constexpr sf::Color kMenuAccentColor(120, 190, 255);  // focused seed field bord
 constexpr sf::Color kFieldSelectionColor(58, 96, 168);  // field selection band
 constexpr double kMenuStripBottom = 34.0;
 
-// fieldIndexForFraction's input contract: the app clamps the pixel ratio
-// to [0, 1] before calling it (finite inputs by construction here).
+/// @brief Clamps a value into [0, 1].
+/// fieldIndexForFraction's input contract: the app clamps the pixel ratio
+/// to [0, 1] before calling it (finite inputs by construction here).
+/// @param value The value to clamp.
+/// @return value moved into [0, 1].
 double clampUnit(double value) {
     return value < 0.0 ? 0.0 : (value > 1.0 ? 1.0 : value);
 }
 
-// SFML 3.0.x has NO Font::getDefault() (that is a later 3.1/master API;
-// verified against build/_deps/sfml-src/include/SFML/Graphics/Font.hpp — the
-// only statics there are glyph/texture accessors). So the plan's "belt"
-// applies: try a few well-known system font files; if none loads, all
-// in-window text (menu labels, chip, seed field) is skipped and stats stay
-// title-bar-only.
+/// @brief Loads a UI font from well-known system font locations.
+/// SFML 3.0.x has no Font::getDefault() (a later 3.1/master API; verified
+/// against build/_deps/sfml-src/include/SFML/Graphics/Font.hpp — its only
+/// statics are glyph/texture accessors), so a short candidate list is
+/// tried in order.
+/// @return The loaded font, or nullopt if none opens -- in-window text
+/// (menu labels, chip, seed field) is then skipped and stats stay
+/// title-bar-only.
 std::optional<sf::Font> loadHudFont() {
     static const char* kCandidates[] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -72,6 +85,13 @@ std::optional<sf::Font> loadHudFont() {
     return std::nullopt;
 }
 
+/// @brief Formats the title-bar stats suffix:
+/// " | FPS xx | UPS xxx | N bodies | t=ss.s".
+/// @param fps Frames per second over the stats window.
+/// @param ups physics updates per second over the same window.
+/// @param bodies current body count.
+/// @param simTime accumulated simulation seconds.
+/// @return The stats text appended to the window title.
 std::string formatStats(double fps, double ups, std::size_t bodies,
                         double simTime) {
     std::ostringstream out;
@@ -83,9 +103,11 @@ std::string formatStats(double fps, double ups, std::size_t bodies,
     return out.str();
 }
 
-// Same shortest-honest-number rendering as MenuModel's option labels
-// (integers bare, fractions at 4 significant digits): mirrored here so
-// the Options header readout matches its dropdown rows.
+/// @brief Renders a value with the same shortest-honest-number rule as
+/// MenuModel's option labels (integers bare, fractions at 4 significant
+/// digits), so the Options header readout matches its dropdown rows.
+/// @param value The number to render.
+/// @return The display text.
 std::string formatOptionValue(double value) {
     if (std::isfinite(value) && value == std::floor(value) &&
         std::fabs(value) < 1e15) {
@@ -96,6 +118,11 @@ std::string formatOptionValue(double value) {
     return out.str();
 }
 
+/// @brief The header value readout for a menu group (value-first, like
+/// the Cloud seed readout).
+/// @param state The live menu state the readout reflects.
+/// @param group The header group being rendered.
+/// @return The current value's display text for that group.
 std::string menuValue(const nbody::app::MenuState& state,
                       nbody::app::MenuGroup group) {
     using nbody::app::MenuGroup;
@@ -103,7 +130,7 @@ std::string menuValue(const nbody::app::MenuState& state,
         return std::to_string(state.seed);
     }
     if (group == MenuGroup::Options) {
-        // Live readout (spec: value-first, like the Cloud seed readout):
+        // Live readout (value-first, like the Cloud seed readout):
         // solar shows the planet count plus the pluto toggle state;
         // two-body/fig-8 show the separation. Random-cloud has no
         // Options header at all.
@@ -128,6 +155,9 @@ std::string menuValue(const nbody::app::MenuState& state,
     return nbody::app::menuItemLabel(state, group, ticked);
 }
 
+/// @brief Builds the live title prefix: "<preset> | <integrator>".
+/// @param state The live menu state (ticked rows name preset and integrator).
+/// @return The title text before the stats suffix.
 std::string liveTitle(const nbody::app::MenuState& state) {
     using nbody::app::MenuGroup;
     return nbody::app::menuItemLabel(
@@ -156,7 +186,7 @@ SimulationApp::SimulationApp(core::SimulationSetup setup,
     menuState_.seed = seed;
     // Seed the bodies option from the CLI (--bodies): an R restart rebuilds
     // through the options-aware builders, so the count survives restarts
-    // (fixes the Task-1-noted bug where windowed restart dropped --bodies).
+    // and a windowed restart never drops --bodies.
     menuState_.bodies = bodies;
     menuState_.dt = setup.config.timeStep;
     world_.reset(std::move(setup.bodies));
@@ -165,12 +195,12 @@ SimulationApp::SimulationApp(core::SimulationSetup setup,
 }
 
 void SimulationApp::rebuildScene(bool refitCamera) {
-    // Rebuild with the FULL current option set (spec D.2/D.3) via the
-    // per-preset builders instead of createPreset's defaults. Mapping note
-    // (controller ruling): figure-eight scale = separation / 10.0 — the
-    // MenuState separation field is shared with two-body (spec D.3), whose
-    // default 10 means scale 1.0, i.e. the byte-identical classic
-    // choreography (pinned by the core figure-eight default tests).
+    // Rebuild with the FULL current option set via the per-preset
+    // builders instead of createPreset's defaults. Mapping note:
+    // figure-eight scale = separation / 10.0 — the MenuState separation
+    // field is shared with two-body, whose default 10 means scale 1.0,
+    // i.e. the byte-identical classic choreography (pinned by the core
+    // figure-eight default tests).
     core::SimulationSetup setup{};
     switch (menuState_.preset) {
         case core::PresetName::TwoBody:
@@ -199,8 +229,8 @@ void SimulationApp::rebuildScene(bool refitCamera) {
 }
 
 void SimulationApp::restartScene() {
-    // D.7 R-stall probe: dump the full rebuild inputs (env-gated, see
-    // Trace.hpp; env-off cost is one predicted branch).
+    // R-restart debug trace: dump the full rebuild inputs (env-gated,
+    // see Trace.hpp; env-off cost is one predicted branch).
     if (traceEnabled()) {
         std::fprintf(stderr,
                      "[%8.3f s] [trace] restart preset=%d seed=%lld "
@@ -233,10 +263,10 @@ void SimulationApp::handleAction(const MenuAction& action) {
     applyEffect(menuApply(menuState_, action, paused_));
 }
 
-// The single effect-dispatch table (spec D.2 rebuild law): live option
-// effects rebuild immediately WITH camera refit, except the random-cloud
-// Cloud edits (seed/bodies), which rebuild but never refit. Staged/None
-// need no app action; everything else mirrors the previous behavior.
+// The single effect-handling table (the rebuild law): live option effects
+// rebuild immediately WITH camera refit, except the random-cloud Cloud
+// edits (seed/bodies), which rebuild but never refit. Staged/None need no
+// app action.
 void SimulationApp::applyEffect(MenuEffect effect) {
     switch (effect) {
         case MenuEffect::PresetChanged:
@@ -275,22 +305,22 @@ void SimulationApp::applyEffect(MenuEffect effect) {
     }
 }
 
-// Focus the shared inline editor on a field row (spec D.4), pre-filled
-// with the field's current value rendered like its row label. The dropdown
-// stays open; Enter commits, Esc ends the edit only, click-away cancels.
+// Focus the shared inline editor on a field row, pre-filled with the
+// field's current value rendered like its row label. The dropdown stays
+// open; Enter commits, Esc ends the edit only, click-away cancels.
 void SimulationApp::openFieldEditor(TextField field) {
     activeField_ = field;
     fieldText_ = {};
     fieldSelecting_ = false;
     // Cursor-position math (clicks, drags, band/caret x) runs on the '0'
     // glyph advance at the 13 px field type size, measured once here:
-    // digits dominate these buffers, so one digit's advance is the spec's
-    // sanctioned approximation for the whole string's layout.
+    // digits dominate these buffers, so one digit's advance is a
+    // deliberate approximation for the whole string's layout.
     fieldAdvance_ =
         font_ ? static_cast<double>(font_->getGlyph(U'0', 13, false).advance)
               : 0.0;
     // Dwell bookkeeping: focusing a field is a click, and clicks hide
-    // tooltips (D.6); the next MouseMoved re-targets.
+    // tooltips; the next MouseMoved re-targets.
     tooltipTarget_ = {};
     tooltipText_.clear();
     switch (field) {
@@ -347,8 +377,8 @@ void SimulationApp::commitFieldEdit() {
     applyEffect(effect);
 }
 
-// Ctrl+C/X/V while a field is focused (spec D.4 + Goal 4). Copy takes the
-// selection span, or the whole buffer with no selection; cut copies then
+// Ctrl+C/X/V while a field is focused. Copy takes the selection span, or
+// the whole buffer with no selection; cut copies then
 // deletes the selection (whole buffer when there is none); paste runs the
 // clipboard through the field grammar AT the caret, replacing the active
 // selection. Any other Ctrl combo is swallowed without touching the text.
@@ -405,8 +435,8 @@ void SimulationApp::handleMenuHit(const MenuHit& hit, core::Vec2 position) {
     }
 
     // Clicking a field row focuses the shared inline editor instead of
-    // activating an action (spec D.4): the dropdown stays open, commit
-    // closes it, Esc keeps it, click-away cancels.
+    // activating an action: the dropdown stays open, commit closes it,
+    // Esc keeps it, click-away cancels.
     if (const std::optional<TextField> field =
             fieldForItem(hit.group, hit.index, menuState_.preset)) {
         openFieldEditor(*field);
@@ -416,8 +446,8 @@ void SimulationApp::handleMenuHit(const MenuHit& hit, core::Vec2 position) {
     menuState_.openGroup.reset();
     if (hit.group == MenuGroup::Cloud &&
         (hit.index == 1 || hit.index == 3)) {
-        // Cloud roll buttons (spec D.2): fresh random_device values routed
-        // through the SAME setters as the typed fields (staging law
+        // Cloud roll buttons: fresh random_device values routed through
+        // the SAME setters as the typed fields (staging law
         // included). Seed: full int64 range; bodies: uniform [2, 2000].
         std::random_device rd;
         MenuEffect effect = MenuEffect::None;
@@ -454,14 +484,14 @@ void SimulationApp::fitCamera() {
 
 void SimulationApp::handleEvents() {
     // SFML 3 event style: pollEvent yields std::optional<sf::Event>; subtypes
-    // via is<T>()/getIf<T>(). (The SFML 2 polling/enum-tag idioms would be a
-    // defect per plan Review Focus #1.)
+    // via is<T>()/getIf<T>(). (SFML 2's waitEvent/event.type idioms are
+    // defects against this API.)
     while (const std::optional<sf::Event> ev = window_.pollEvent()) {
         if (ev->is<sf::Event::Closed>()) {
             window_.close();
             continue;
         }
-        // Field editor priority (Review Focus 4): the delivery ORDER of
+        // Field editor priority: the delivery ORDER of
         // TextEntered vs the matching KeyPressed varies by platform (on
         // X11, WindowImplX11 pushes KeyPressed before TextEntered) -- never
         // rely on it here. Correctness is order-independent because the two
@@ -475,7 +505,8 @@ void SimulationApp::handleEvents() {
                 const char32_t ch = text->unicode;
                 if (ch >= U' ' && ch < U'\x7f') {
                     // Typing inserts AT the caret (replacing the selection
-                    // when one is active); the grammar laws are Task 4's.
+                    // when one is active); fieldInsertChar enforces the
+                    // field's input grammar.
                     fieldInsertChar(*activeField_, static_cast<char>(ch),
                                     fieldText_);
                 }
@@ -505,7 +536,7 @@ void SimulationApp::handleEvents() {
                     fieldEditDelete(*activeField_, fieldText_, true);
                 } else if (key->code == sf::Keyboard::Key::Left) {
                     // Shift extends the selection (anchor stays), plain
-                    // moves collapse it onto the caret (Task 4's anchor law).
+                    // moves collapse the selection onto the caret.
                     fieldMoveCaret(fieldText_, -1, key->shift);
                 } else if (key->code == sf::Keyboard::Key::Right) {
                     fieldMoveCaret(fieldText_, 1, key->shift);
@@ -521,7 +552,7 @@ void SimulationApp::handleEvents() {
                 continue;
             }
             if (key->code == sf::Keyboard::Key::Escape) {
-                hideTooltip();  // menu-close hides tooltips (D.6)
+                hideTooltip();  // closing a menu hides the tooltip
                 if (menuState_.openGroup) {
                     menuState_.openGroup.reset();
                 } else {
@@ -531,13 +562,12 @@ void SimulationApp::handleEvents() {
                 hideTooltip();  // a menu close (staged chip disappears) hides
                 if (paused_) {
                     const MenuStaged staged = menuTakeStaged(menuState_);
-                    // Consumption order (spec D.3): preset (rebuilds with
-                    // the FULL current options) -> integrator -> dt -> seed
-                    // -> bodies. While paused the setters only wrote the
+                    // Consumption order: preset (rebuilds with the FULL
+                    // current options) -> integrator -> dt -> seed ->
+                    // bodies. While paused the setters only wrote the
                     // staged mirrors (live option fields untouched), so the
                     // option mirrors fold into the live state FIRST — the
-                    // preset step's rebuild must already use them ("option
-                    // rebuilds folded into the preset step", D.3).
+                    // preset step's rebuild must already use them.
                     if (staged.bodies) {
                         menuState_.bodies = *staged.bodies;
                     }
@@ -582,9 +612,9 @@ void SimulationApp::handleEvents() {
                     // The staged option tail (bodies/separation/path/
                     // planets/pluto): any mirror set (even without a staged
                     // preset) requires a rebuild with the new option values.
-                    // Refit law per D.2: a staged bodies change is a
-                    // random-cloud Cloud edit and never refits; every other
-                    // option edit refits.
+                    // Refit law: a staged bodies change is a random-cloud
+                    // Cloud edit and never refits; every other option edit
+                    // refits.
                     if (!staged.preset &&
                         (staged.bodies || staged.separation ||
                          staged.hyperbolic || staged.planets ||
@@ -609,22 +639,22 @@ void SimulationApp::handleEvents() {
         const auto* move = ev->getIf<sf::Event::MouseMoved>();
         const sf::Vector2u size = window_.getSize();
         if (wheel != nullptr) {
-            hideTooltip();  // scroll hides tooltips (D.6)
+            hideTooltip();  // scrolling hides the tooltip
             camera_.zoomAt(core::Vec2{static_cast<double>(wheel->position.x),
                                       static_cast<double>(wheel->position.y)},
                            static_cast<double>(wheel->delta),
                            static_cast<double>(size.x),
                            static_cast<double>(size.y));
         } else if (press != nullptr) {
-            hideTooltip();  // any click hides the tooltip (D.6)
+            hideTooltip();  // any click hides the tooltip
             const core::Vec2 position{static_cast<double>(press->position.x),
                                       static_cast<double>(press->position.y)};
             const MenuLayout layout = menuLayout(
                 static_cast<double>(size.x), static_cast<double>(size.y),
                 menuState_.openGroup, menuState_.preset);
             const MenuHit hit = menuHitTest(layout, position);
-            // Double-press detector for the focused field (spec Goal 4;
-            // SFML 3.0 has no double-click event): every left press
+            // Double-press detector for the focused field (SFML 3.0 has
+            // no double-click event): every left press
             // records its time+spot, and a press within 250 ms AND 4 px
             // of the previous left press reads as a double-click.
             const bool left = press->button == sf::Mouse::Button::Left;
@@ -642,7 +672,7 @@ void SimulationApp::handleEvents() {
                 // The focused field's own row (and its group header) keep
                 // focus; anywhere else the edit is cancelled first, then
                 // the click falls through to normal handling below -- menu
-                // hit or drag start, no early return (D.4).
+                // hit or drag start, no early return.
                 const bool onFieldRow =
                     left && hit.kind == MenuHitKind::Item &&
                     fieldForItem(hit.group, hit.index, menuState_.preset) ==
@@ -651,7 +681,7 @@ void SimulationApp::handleEvents() {
                     static_cast<std::size_t>(hit.index) <
                         layout.items.size()) {
                     // Left-press inside the focused row places the caret
-                    // at the clicked x (goal 4); a double-press selects
+                    // at the clicked x; a double-press selects
                     // the whole buffer. The held drag then moves the caret
                     // with the anchor fixed (MouseMoved below); releasing
                     // anywhere keeps both selection and focus.
@@ -727,7 +757,7 @@ void SimulationApp::handleEvents() {
             }
             lastMouse_ = move->position;
             // Tooltip target = header/row under the cursor, recomputed on
-            // every move; a target CHANGE restarts the 0.5 s dwell (D.6).
+            // every move; a target CHANGE restarts the 0.5 s dwell.
             // Hovering never touches selection/highlight (menuState_ is
             // read-only here).
             updateTooltipTarget();
@@ -736,7 +766,11 @@ void SimulationApp::handleEvents() {
 }
 
 namespace {
-// MenuHit identity for dwell bookkeeping: same cell under the cursor.
+/// @brief True when both hits denote the same menu cell: the tooltip
+/// dwell tracks an unchanged header/row target.
+/// @param a The previously resolved hover target.
+/// @param b The newly resolved hover target.
+/// @return True when kind, group, and index all agree.
 bool sameHit(const MenuHit& a, const MenuHit& b) {
     return a.kind == b.kind && a.group == b.group && a.index == b.index;
 }
@@ -758,7 +792,7 @@ void SimulationApp::updateTooltipTarget() {
     }
     if (!sameHit(hit, tooltipTarget_)) {
         tooltipTarget_ = hit;
-        tooltipClock_.restart();  // target change resets the dwell (D.6)
+        tooltipClock_.restart();  // target change restarts the dwell timer
     }
     tooltipText_ = std::move(text);
 }
@@ -769,14 +803,14 @@ void SimulationApp::hideTooltip() {
 }
 
 void SimulationApp::update(sf::Time frameTime) {
-    // Fixed-timestep loop (plan D.2): the frame time is clamped by
+    // Fixed-timestep loop: the frame time is clamped by
     // kMaxFrameTime (0.25 s) and at most kMaxStepsFrame (30) steps run per
     // frame, with the leftover accumulator dropped — a hang never turns into
     // a catch-up burst. Pause drains the accumulator but skips world_.step().
     const StepPlan plan =
         planSteps(accumulator_, frameTime.asSeconds(), world_.timeStep());
     if (traceEnabled()) {
-        // Step-planning inputs (D.7): a frozen sim shows up here as
+        // Step-planning inputs: a frozen sim shows up here as
         // steps=0 forever (dt/acc anomaly) or steps>0 with the world
         // refusing to advance (core-side stall).
         std::fprintf(stderr,
@@ -814,12 +848,12 @@ void SimulationApp::updateStats() {
                                world_.simulationTime());
     window_.setTitle(liveTitle(menuState_) + statsSuffix_);
     if (traceEnabled()) {
-        // Stats-window outcome (D.7): the measured interval (secs) and the
+        // Stats-window outcome: the measured interval (secs) and the
         // UPS/fps the title now shows. stepsSince clamps the post-restart
         // counter reset (a raw unsigned subtract wrapped to ~2^64 and the
         // title rendered garbage UPS for one window after every R);
-        // paused/acc alongside t is what the controller's one-off R stall
-        // needed to distinguish pause/catch-up/clock theories.
+        // paused/acc alongside t is what distinguishes the pause,
+        // catch-up and clock theories when a restart looks stalled.
         std::fprintf(stderr,
                      "[%8.3f s] [trace] stats secs=%.6f ups=%.1f fps=%.1f "
                      "bodies=%zu t=%.6f acc=%.6f paused=%d\n",
@@ -828,11 +862,17 @@ void SimulationApp::updateStats() {
     }
 }
 
-// Spec D.3 planet-style body renderer (Task 2). SFML 3.0.2 has NO
-// EllipseShape and NO stencil/group APIs, so every effect below is built
-// from plain CircleShapes, RectangleShapes and Triangle VertexArrays.
-// Draw order per body: glow halos -> ring back -> body circle -> shading ->
-// bands -> ring front.
+/// @brief Draws one body in the planet style.
+/// SFML 3.0.2 has no EllipseShape and no stencil/group APIs, so every
+/// effect here is built from plain CircleShapes, RectangleShapes and
+/// Triangle VertexArrays.
+/// Draw order per body: glow halos -> ring back -> body circle -> shading
+/// -> bands -> ring front.
+/// @param window Target render window.
+/// @param body The body to draw (position, radius, appearance).
+/// @param camera Active camera mapping world space onto the window.
+/// @param w Window width in pixels.
+/// @param h Window height in pixels.
 void drawBody(sf::RenderWindow& window, const core::Body& body,
               const Camera& camera, double w, double h) {
     constexpr double kPi = 3.14159265358979323846;
@@ -846,7 +886,7 @@ void drawBody(sf::RenderWindow& window, const core::Body& body,
                               static_cast<std::uint8_t>(c & 0xFFU));
     }
 
-    // Minimum visible size (D.3): 3 px floor, doubled for glowing bodies
+    // Minimum visible size: 3 px floor, doubled for glowing bodies
     // (suns). Cosmetic only — physical collision radii are untouched.
     const double px = std::max(body.radius * camera.scale,
                                body.appearance.glow ? 6.0 : 3.0);
@@ -861,8 +901,8 @@ void drawBody(sf::RenderWindow& window, const core::Body& body,
     };
 
     if (body.appearance.glow) {  // sun: three soft concentric halos
-        // Halo radii deliberately tighter than spec D.3's 3.2/2.1/1.4: less
-        // overdraw on aarch64, and verified visually acceptable.
+        // Halo radii deliberately tighter than 3.2/2.1/1.4: less overdraw
+        // on aarch64, and verified visually acceptable.
         const double haloRadius[3] = {px * 2.5, px * 1.8, px * 1.3};
         const std::uint8_t haloAlpha[3] = {24, 48, 96};
         for (int i = 0; i < 3; ++i) {
@@ -933,7 +973,7 @@ void drawBody(sf::RenderWindow& window, const core::Body& body,
 
     disc(px, bodyColor, center);  // the body itself
 
-    // Shading variant chosen: the offset-circle FALLBACK from spec D.3, not
+    // Shading variant chosen: the offset-circle FALLBACK, not
     // the 180-degree sector. SFML 3.0.2 has no stencil, and the two-disc
     // half-overlay composite flickers; a single (0,0,0,50) disc offset
     // 0.25*px away from the world origin (the sun) reads correctly as the
@@ -950,8 +990,8 @@ void drawBody(sf::RenderWindow& window, const core::Body& body,
         }
     }
 
-    // Gas-giant bands (D.3): chord RectangleShapes fully inside the disc, no
-    // stencil needed. Latitudes t = +-0.4 exactly for two-band planets (spec),
+    // Gas-giant bands: chord RectangleShapes fully inside the disc, no
+    // stencil needed. Latitudes t = +-0.4 exactly for two-band planets,
     // else the generic t = 2k/(bands+1)-1; half-chord 0.88*r*sqrt(1-t^2),
     // height r*0.35/(bands/2), colour = 0.72x body RGB.
     if (body.appearance.bands > 0 && px >= 8.0) {
@@ -962,7 +1002,7 @@ void drawBody(sf::RenderWindow& window, const core::Body& body,
             static_cast<std::uint8_t>(bodyColor.g * 0.72F),
             static_cast<std::uint8_t>(bodyColor.b * 0.72F), 255);
         for (int k = 1; k <= bands; ++k) {
-            // Spec D.3 pins the two-band latitudes to exactly +-0.4r; the
+            // The two-band latitudes are pinned to exactly +-0.4r; the
             // generic formula would give +-1/3, so emit +-0.4*px directly
             // when bands==2 (Saturn). Jupiter (bands=3) keeps the generic
             // -0.5/0/+0.5 pattern (deviation documented, not silently off).
@@ -996,12 +1036,12 @@ void SimulationApp::render() {
 
     window_.clear(kBackground);
 
-    // Infinite tiled starfield first (spec D.5): the viewport's world rect
+    // Infinite tiled starfield first: the viewport's world rect
     // (viewportStarRect: camera_.toWorld of the corners + 2 px pad, the
     // corner mapping itself unit-tested in test_starfield.cpp) is re-queried
     // every frame, so panning slides a subset of one global grid and zoom
-    // stays populated at any scale. Quads stay viewport-culled with the
-    // same 2 px pixel margin the old fixed field used.
+    // stays populated at any scale. Quads stay viewport-culled with a
+    // 2 px pixel margin.
     const Rect view = viewportStarRect(camera_, w, h);
     const std::vector<Star> stars =
         starsInRect(view.x0, view.y0, view.x1, view.y1);
@@ -1014,8 +1054,8 @@ void SimulationApp::render() {
             sf::Vector2f{static_cast<float>(star.sizePx),
                         static_cast<float>(star.sizePx)}};
         dot.setPosition(toSf(p));
-        // dim = alpha 120, spec D.3's 0.2-0.8 band; bright = FULL white:
-        // a deliberate deviation for visibility on bright desktops.
+        // dim = alpha 120 (the 0.2-0.8 alpha band); bright = FULL white:
+        // deliberately brighter for visibility on bright desktops.
         dot.setFillColor(sf::Color(
             star.r, star.g, star.b,
             static_cast<std::uint8_t>(star.dim ? 120 : 255)));
@@ -1026,9 +1066,9 @@ void SimulationApp::render() {
         drawBody(window_, b, camera_, w, h);
     }
 
-    // On-screen HUD duplicate deliberately removed (spec D.3): stats live
-    // in the title bar only (updateStats). The staged-chip below stays --
-    // it is menu UI, not a HUD.
+    // No on-screen HUD by design: stats live in the title bar only
+    // (updateStats). The staged chip below stays -- it is menu UI, not
+    // a HUD.
 
     const MenuLayout layout =
         menuLayout(w, h, menuState_.openGroup, menuState_.preset);
@@ -1107,7 +1147,7 @@ void SimulationApp::render() {
                 if (activeField_ &&
                     fieldForItem(*layout.openGroup, static_cast<int>(index),
                                  menuState_.preset) == *activeField_) {
-                    // Focused typed field (spec D.4 + Goal 4) at the row
+                    // Focused typed field at the row
                     // rect: accent outline, selection band, buffer text,
                     // and a 1 px accent caret AT the caret index (no more
                     // end-of-buffer "|" glyph). The caret blinks on the
@@ -1226,11 +1266,11 @@ void SimulationApp::render() {
         }
     }
 
-    // Tooltips draw LAST, above the staged chip (spec D.6).
+    // Tooltips draw LAST, above the staged chip.
     renderTooltip();
 }
 
-// Hover tooltip box (spec D.6): bg rgb(30,34,54) alpha 240, 1 px border,
+// Hover tooltip box: bg rgb(30,34,54) alpha 240, 1 px border,
 // 11 px text, at cursor+(12,18), clamped on-screen. Shown once the cursor
 // has dwelled 0.5 s on an unchanged header/row target (the clock was last
 // restarted by updateTooltipTarget on a target change).

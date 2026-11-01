@@ -1,3 +1,9 @@
+/// @file
+/// The pure menu-bar geometry tables and layout math: header sizing,
+/// dropdown row counts, visibility per preset, and the shared row-indent
+/// law. All sizes are deterministic (no font metrics), keeping layout
+/// unit-testable and the renderer's job to drawing rects.
+
 #include "nbody/app/MenuBar.hpp"
 
 namespace nbody::app {
@@ -18,10 +24,12 @@ constexpr double kHeaderPadding = 16.0;
 // plausible header readout, floored at kMinimumHeaderWidth. Widest
 // values: the Cloud seed readout (19 chars), the Simulation preset name
 // ("figure-eight", 12) and the Options planets+pluto readout (12).
-// Every header now renders "label: value", so no group gets a zero value
-// extent -- a zero here lets the text overflow into the neighbouring
-// tab (the header-overflow bug this table exists to prevent).
+// Every header renders "label: value", so no group gets a zero value
+// extent -- a zero here would let the text overflow into the
+// neighbouring tab, which this table exists to prevent.
+/// @brief Pixels assumed per label character when sizing headers.
 constexpr double kLabelAdvance = 7.0;
+/// @brief Reserved width for each group's widest "label: value" readout.
 constexpr double kValueExtents[] = {98.0, 49.0, 56.0, 99.0, 80.0};
 constexpr const char* kGroupLabels[] = {"Simulation", "Integrator",
                                         "Physics", "Cloud", "Options"};
@@ -30,6 +38,10 @@ constexpr std::size_t kGroupCount =
 static_assert(kGroupCount == static_cast<std::size_t>(MenuGroup::Count_),
               "one label per menu group");
 
+/// @brief The fixed-advance width of a header label (kLabelAdvance per
+/// character).
+/// @param label NUL-terminated header label text.
+/// @return The label's width in pixels.
 constexpr double labelExtent(const char* label) {
     double width = 0.0;
     for (const char* p = label; *p != '\0'; ++p) {
@@ -38,6 +50,10 @@ constexpr double labelExtent(const char* label) {
     return width;
 }
 
+/// @brief One header's content width: label + value extent + padding,
+/// raised to kMinimumHeaderWidth.
+/// @param group Menu group index into the label/extent tables.
+/// @return The header's width in pixels.
 constexpr double headerWidthFor(std::size_t group) {
     const double width =
         labelExtent(kGroupLabels[group]) + kValueExtents[group] +
@@ -45,20 +61,25 @@ constexpr double headerWidthFor(std::size_t group) {
     return width > kMinimumHeaderWidth ? width : kMinimumHeaderWidth;
 }
 
-// -> {184, 135, 121, 150, 145}: the first three widened so each "label:
-// value" readout fits; Cloud keeps 150, Options lands at 145.
+// -> {184, 135, 121, 150, 145}: every header is wide enough for its
+// "label: value" readout to fit without touching the neighbouring tab.
 constexpr double kHeaderWidths[] = {headerWidthFor(0), headerWidthFor(1),
                                     headerWidthFor(2), headerWidthFor(3),
                                     headerWidthFor(4)};
+/// @brief Per-group header tooltips, indexed by MenuGroup.
 constexpr const char* kHeaderTooltips[] = {
     "Choose the starting configuration",
     "Choose the integration method",
     "Choose how much time each step advances",
     "Options for the random-cloud simulation",
     "Options for the selected simulation"};
+/// @brief Preset menu names, indexed by enum value (= Simulation row).
 constexpr const char* kPresetLabels[] = {
     "two-body", "solar-system", "random-cloud", "figure-eight"};
 
+/// @brief The preset's enum value as an int, for table lookups.
+/// @param preset The preset to index.
+/// @return 0-3 for a valid preset, -1 otherwise.
 int presetIndex(core::PresetName preset) {
     switch (preset) {
         case core::PresetName::TwoBody:
@@ -81,8 +102,8 @@ bool MenuRect::contains(core::Vec2 p) const {
 }
 
 int menuPresetOptionCount(core::PresetName preset) {
-    // Spec D.1/D.2: two-body = separation + path; solar-system = planets +
-    // pluto; random-cloud = none (its options live in the Cloud group);
+    // Two-body = separation + path; solar-system = planets + pluto;
+    // random-cloud = none (its options live in the Cloud group);
     // figure-eight = separation (scale) only.
     switch (preset) {
         case core::PresetName::TwoBody:
@@ -121,13 +142,13 @@ int menuItemCount(MenuGroup group, core::PresetName preset) {
     switch (group) {
         case MenuGroup::Simulation:
             // 4 presets + separator + restart, identical for every
-            // preset; the option rows live in the Options group now.
+            // preset; the option rows belong to the Options group.
             return 6;
         case MenuGroup::Integrator:
             return 2;
         case MenuGroup::Physics:
-            // dt list only: the separator + restart rows moved to
-            // Simulation (7 -> 5).
+            // dt list only: the separator and restart rows belong to
+            // Simulation.
             return 5;
         case MenuGroup::Cloud:
             return 4;
@@ -215,6 +236,9 @@ MenuLayout menuLayout(double winW, double winH,
 
     const int count = menuItemCount(*openGroup, preset);
     const double height = static_cast<double>(count) * kItemHeight;
+    // Vertical placement: hang below the bar at kDropdownY; when the
+    // dropdown would run past the window bottom, flip it upward so its
+    // bottom edge rests kDropdownBottom above the window bottom.
     const double y = winH - kDropdownY < height
                          ? kDropdownBottom - height
                          : kDropdownY;

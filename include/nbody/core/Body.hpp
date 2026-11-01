@@ -1,3 +1,9 @@
+/// @file
+/// The Body: one simulated point mass with a position, velocity, and purely
+/// cosmetic rendering hints. Physics reads only id/mass/radius/position/
+/// velocity; the nested Appearance struct exists for the renderer and is
+/// never consulted by the simulation.
+
 #pragma once
 
 #include <cstdint>
@@ -6,12 +12,14 @@
 
 namespace nbody::core {
 
+/// @brief One simulated body: point-mass state plus cosmetic look.
 struct Body {
-    // Purely cosmetic (spec D.1): the renderer's per-body look. Physics never
-    // reads any of it — no branch in step/merge/forces consults appearance;
-    // on a merge only the survivor object (and thus its appearance) carries
-    // through. Default-constructed = all-default, so existing 5-value brace
-    // inits keep compiling and behaving identically.
+    /// @brief The renderer's per-body look; purely cosmetic.
+    /// @details Physics never reads any of it — no branch in step/merge/
+    ///   forces consults appearance; on a merge only the survivor object
+    ///   (and thus its appearance) carries through. Default-constructed =
+    ///   all-default, so 5-value brace inits keep compiling and behaving
+    ///   identically.
     struct Appearance {
         std::uint32_t color = 0u;  // 0xRRGGBB; 0 = "use palette by id % 8"
         bool glow = false;         // star-style radial glow
@@ -19,7 +27,7 @@ struct Body {
         std::uint8_t bands = 0;    // 0 none; 2-3 latitude stripes (gas giants)
     };
 
-    // Constructor (not aggregate init) so the 50+ existing 5-value sites
+    // Constructors (rather than aggregate init) so existing 5-value sites
     // Body{id, mass, radius, position, velocity} stay warning-free under
     // -Wextra's -Wmissing-field-initializers; behaviour is unchanged: the
     // omitted appearance argument is the all-default Appearance.

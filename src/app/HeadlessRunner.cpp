@@ -1,3 +1,7 @@
+/// @file
+/// The window-free stats run: fixed-step physics followed by the pinned
+/// stdout stats line (see the header for the output format).
+
 #include "nbody/app/HeadlessRunner.hpp"
 
 #include <iomanip>

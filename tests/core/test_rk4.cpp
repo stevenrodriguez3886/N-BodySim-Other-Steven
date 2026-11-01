@@ -1,3 +1,8 @@
+/// @file
+/// Tests for the classic RK4 integrator: exact free-particle motion,
+/// one-period return on the two-body circular orbit, and an energy-drift
+/// comparison against explicit Euler on the identical setup.
+
 #include <cmath>
 #include <vector>
 
@@ -16,8 +21,12 @@ using Catch::Approx;
 
 namespace {
 
-// Total energy, same softened-potential convention as test_euler.cpp
-// (E = sum 1/2 m v^2 - sum_{i<j} G m_i m_j / sqrt(d^2 + eps^2)).
+/// @brief Total energy, same softened-potential convention as the Euler
+/// tests: E = sum 1/2 m v^2 - sum_{i<j} G m_i m_j / sqrt(d^2 + eps^2).
+/// @param bodies Bodies whose kinetic and pairwise potential energy is summed.
+/// @param g Gravitational constant.
+/// @param eps Softening length used in the pairwise potential.
+/// @return The total mechanical energy of the system.
 double totalEnergy(const std::vector<Body>& bodies, double g, double eps) {
     double e = 0.0;
     for (const Body& b : bodies) {
@@ -34,7 +43,17 @@ double totalEnergy(const std::vector<Body>& bodies, double g, double eps) {
     return e;
 }
 
-// Relative energy drift |E1 - E0| / |E0| over `steps` steps of `integ`.
+/// @brief Runs a system and reports its relative total-energy drift,
+/// |E1 - E0| / |E0|, over the given number of steps.
+/// @param integrator The integrator to advance the system with.
+/// @param bodies The initial state (taken by value; the caller's vector is
+///               untouched).
+/// @param field The gravity field to step under.
+/// @param dt Time step per integration step.
+/// @param steps Number of integration steps to take.
+/// @param g Gravitational constant matching `field`, for the energy formula.
+/// @param eps Softening length matching `field`, for the energy formula.
+/// @return The relative change in total energy over the run.
 double energyDrift(IIntegrator& integrator, std::vector<Body> bodies,
                    const GravityField& field, double dt, int steps,
                    double g, double eps) {
@@ -46,10 +65,12 @@ double energyDrift(IIntegrator& integrator, std::vector<Body> bodies,
     return std::abs(e1 - e0) / std::abs(e0);
 }
 
-// Two-body circular preset (plan C.5): m=1 at (+-1, 0), v = (0, +-/ 0.5)
-// with the counter-clockwise pairing (v_y = +GM/(2*|x|) = +0.5 at x = +1),
-// matching test_euler.cpp's energy_drift_euler setup. G = 1, eps = 0.
-// Period: omega = v/r = 0.5, so T = 2*pi/omega = 4*pi.
+/// @brief The two-body circular orbit: m = 1 at (+-1, 0), v = (0, +-0.5)
+/// with the counter-clockwise pairing (v_y = +GM/(2*|x|) = +0.5 at x = +1),
+/// the same setup as euler_energy_drift_euler. G = 1, eps = 0. Circular
+/// speed derivation: for the equal-mass pair sharing the separation, the
+/// orbit condition gives omega = v/r = 0.5, so T = 2*pi/omega = 4*pi.
+/// @return A fresh two-body system at t = 0.
 std::vector<Body> twoBodyCircular() {
     return {
         Body{1, 1.0, 0.1, Vec2{1.0, 0.0}, Vec2{0.0, 0.5}},
@@ -59,10 +80,11 @@ std::vector<Body> twoBodyCircular() {
 
 }  // namespace
 
+/// @brief An isolated body under RK4 follows the analytic straight line to
+/// machine precision (margin 1e-9).
 TEST_CASE("rk4_constant_velocity_exact") {
-    // One isolated body: zero acceleration, so RK4's weighted sum collapses
-    // to x += v*dt at every stage and must reproduce the analytic straight
-    // line to machine precision (margin 1e-9).
+    // Zero acceleration: RK4's weighted sum collapses to x += v*dt at every
+    // stage.
     Rk4Integrator rk4;
     CHECK(rk4.name() == "rk4");
 
@@ -81,10 +103,10 @@ TEST_CASE("rk4_constant_velocity_exact") {
     CHECK(bodies[0].velocity.y == Approx(0.5).margin(1e-9));
 }
 
+/// @brief After exactly one period T = 4*pi, integrated with RK4 at
+/// dt = T/4000, each body of the two-body circular orbit must return within
+/// 2% relative of its start position.
 TEST_CASE("rk4_orbit_period_return") {
-    // Headline acceptance test (plan C.3/C.5): the two-body circular preset
-    // under RK4 with dt = T/4000 must return each body within 2% relative
-    // of its start position after exactly one period T = 4*pi.
     Rk4Integrator rk4;
     std::vector<Body> bodies = twoBodyCircular();
     const std::vector<Body> start = bodies;
@@ -109,10 +131,10 @@ TEST_CASE("rk4_orbit_period_return") {
     }
 }
 
+/// @brief On the same two-body setup and step count as the Euler drift test
+/// (40000 steps at dt = 1/120), RK4's relative energy drift must be at least
+/// 100x smaller than explicit Euler's.
 TEST_CASE("rk4_beats_euler") {
-    // Same setup and step count as energy_drift_euler (40000 steps at
-    // dt = 1/120 on the two-body circular preset). RK4's relative energy
-    // drift must be at least 100x smaller than explicit Euler's.
     const double g = 1.0;
     const double eps = 0.0;
     const double dt = 1.0 / 120.0;

@@ -1,3 +1,7 @@
+/// @file
+/// O(n^2) pairwise gravity loop with Newton's third law applied symmetrically
+/// per pair, a softened d^2 + eps^2 denominator, and a coincidence guard.
+
 #include "nbody/core/GravityField.hpp"
 
 #include <cmath>

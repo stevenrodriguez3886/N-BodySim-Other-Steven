@@ -1,3 +1,7 @@
+/// @file test_text_field.cpp
+/// @brief Text-field grammar tests: per-field typing rules, paste
+/// filtering, parsing to model values, initial display strings, and the
+/// menu-row field mapping.
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -13,10 +17,12 @@ namespace core = nbody::core;
 
 namespace {
 
-// Type a whole string char by char, returning the accepted suffix.
-// Append-mode typing: caret/anchor parked at the end, where
-// fieldInsertChar IS the old fieldAppendChar law (that pair is now
-// file-private inside TextField.cpp).
+/// @brief Type a whole string one char at a time in append mode.
+/// The caret and anchor stay parked at the end, so every char is inserted
+/// as if freshly typed.
+/// @param field The field whose grammar filters every char.
+/// @param chars The characters to "type", in order.
+/// @return The resulting buffer after all accepted chars were inserted.
 std::string typeAll(TextField field, const std::string& chars) {
     FieldText text;
     for (const char ch : chars) {
@@ -27,6 +33,7 @@ std::string typeAll(TextField field, const std::string& chars) {
 
 }  // namespace
 
+/// @brief Seed typing accepts digits plus one leading minus, capped.
 TEST_CASE("textfield_seed_grammar", "[app][textfield]") {
     // Digits plus at most one leading '-'; 19 chars max; leading zeros trim.
     CHECK(typeAll(TextField::Seed, "12345") == "12345");
@@ -40,12 +47,13 @@ TEST_CASE("textfield_seed_grammar", "[app][textfield]") {
     CHECK(typeAll(TextField::Seed, "000") == "0");
     CHECK(typeAll(TextField::Seed, "-0005") == "-5");
     CHECK(typeAll(TextField::Seed, "-0") == "-0");  // parses 0, sign survives
-    // 19-char cap: the 20th char is refused (int64 field, spec D.4).
+    // 19-char cap: the 20th char is refused (int64 field).
     const std::string typed = typeAll(TextField::Seed, "12345678901234567890");
     CHECK(typed == "1234567890123456789");
     CHECK(typed.size() == 19);
 }
 
+/// @brief Bodies, separation, and planets accept only their legal chars.
 TEST_CASE("textfield_bodies_separation_planets_grammars", "[app][textfield]") {
     // bodies: digits, 4 chars (2..2000 clamped core-side).
     CHECK(typeAll(TextField::Bodies, "300") == "300");
@@ -70,9 +78,9 @@ TEST_CASE("textfield_bodies_separation_planets_grammars", "[app][textfield]") {
     CHECK(typeAll(TextField::Planets, "1.5") == "1");
 }
 
+/// @brief Backspace deletes left of the caret, down to an empty buffer.
 TEST_CASE("textfield_backspace", "[app][textfield]") {
-    // Backspace == fieldEditDelete backward with the caret at the end
-    // (the old buffer-only fieldBackspace is gone).
+    // Backspace is fieldEditDelete backward with the caret at the end.
     FieldText text;
     text.buffer = typeAll(TextField::Seed, "-123");
     text.caret = text.buffer.size();
@@ -89,8 +97,9 @@ TEST_CASE("textfield_backspace", "[app][textfield]") {
     CHECK(text.buffer.empty());
 }
 
+/// @brief Paste filtering matches the typing grammar and length caps.
 TEST_CASE("textfield_paste_filter_matches_typing", "[app][textfield]") {
-    // Paste = same grammar + overflow rules as typing (D.4).
+    // Paste applies the same grammar + overflow rules as typing.
     CHECK(fieldSanitizePaste(TextField::Seed, "1-2") == "12");
     CHECK(fieldSanitizePaste(TextField::Seed, "-0012ab") == "-12");
     CHECK(fieldSanitizePaste(TextField::Seed,
@@ -103,12 +112,13 @@ TEST_CASE("textfield_paste_filter_matches_typing", "[app][textfield]") {
     CHECK(fieldSanitizePaste(TextField::Seed, "abc") == "");
 }
 
+/// @brief Parsers commit the documented defaults, clamps, and saturation.
 TEST_CASE("textfield_parsing", "[app][textfield]") {
     CHECK(fieldParseSeed("42") == 42);
     CHECK(fieldParseSeed("-7") == -7);
     CHECK(fieldParseSeed("") == 0);       // empty commits 0 (law preserved)
     CHECK(fieldParseSeed("-") == 0);
-    // int64 saturation on overflow (spec D.4).
+    // int64 saturation on overflow.
     CHECK(fieldParseSeed("99999999999999999999999") ==
           std::numeric_limits<std::int64_t>::max());
     CHECK(fieldParseSeed("-99999999999999999999999") ==
@@ -118,7 +128,7 @@ TEST_CASE("textfield_parsing", "[app][textfield]") {
     CHECK(fieldParseSeparation("10.5") == Catch::Approx(10.5));
     CHECK(fieldParseSeparation("") == 0.5);  // empty commits the floor
     CHECK(fieldParseSeparation("7") == Catch::Approx(7.0));
-    // Field range [0.5, 500] clamps at the parse boundary (spec D.3):
+    // Field range [0.5, 500] clamps at the parse boundary:
     // neither the model setters nor core clamp separation.
     CHECK(fieldParseSeparation("0") == 0.5);   // floor (also stops s=0 div)
     CHECK(fieldParseSeparation("1234567") == 500.0);  // ceiling
@@ -127,6 +137,7 @@ TEST_CASE("textfield_parsing", "[app][textfield]") {
     CHECK(fieldParsePlanets("8") == 8);
 }
 
+/// @brief Initial strings render values in the menu-row label style.
 TEST_CASE("textfield_initial_values_match_row_labels", "[app][textfield]") {
     CHECK(fieldInitialSeed(-7) == "-7");
     CHECK(fieldInitialBodies(150) == "150");
@@ -135,8 +146,9 @@ TEST_CASE("textfield_initial_values_match_row_labels", "[app][textfield]") {
     CHECK(fieldInitialPlanets(8) == "8");
 }
 
+/// @brief Field rows agree with the live menu model's mapping.
 TEST_CASE("textfield_row_mapping_matches_menu_model", "[app][textfield]") {
-    // D.1/D.2 field rows: Options row 0 (separation/planets per preset),
+    // Field rows: Options row 0 (separation/planets per preset),
     // Cloud rows 0 (seed) / 2 (bodies). Everything else: no field.
     CHECK(fieldForItem(MenuGroup::Options, 0, core::PresetName::TwoBody) ==
           TextField::Separation);

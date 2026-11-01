@@ -1,13 +1,17 @@
+/// @file
+/// Explicit Euler step: one gravity evaluation, then x += v*dt and v += a*dt
+/// in that exact order (the position update must use the OLD velocity).
+
 #include "nbody/core/EulerIntegrator.hpp"
 
 namespace nbody::core {
 
 void EulerIntegrator::step(std::vector<Body>& bodies,
                            const GravityField& gravity, double dt) {
-    // One acceleration evaluation at the CURRENT positions (explicit Euler,
-    // plan C.2). computeAccelerations resizes accel_ to exactly
-    // bodies.size() and fully rewrites every entry, which also covers the
-    // edge case of the body count changing between steps (Task 6 merges).
+    // One acceleration evaluation at the CURRENT positions (explicit Euler).
+    // computeAccelerations resizes accel_ to exactly bodies.size() and fully
+    // rewrites every entry, which also covers the edge case of the body
+    // count shrinking between steps (world merges erase bodies).
     gravity.computeAccelerations(bodies, accel_);
 
     for (std::size_t i = 0; i < bodies.size(); ++i) {

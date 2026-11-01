@@ -1,3 +1,7 @@
+/// @file test_text_field_caret.cpp
+/// @brief Caret and selection behaviour of the menu text fields: insertion,
+/// deletion, selection folding, caret movement, and paste splicing under
+/// each field's grammar.
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
@@ -9,8 +13,11 @@ using namespace nbody::app;
 
 namespace {
 
-// Build a FieldText with an explicit caret (and optional selection anchor;
-// anchor defaults to the caret, i.e. no selection).
+/// @brief Build a FieldText with an explicit buffer, caret, and anchor.
+/// @param buffer The field's text.
+/// @param caret The caret index into buffer.
+/// @param anchor The selection anchor index into buffer.
+/// @return A FieldText holding the given buffer and caret/anchor pair.
 FieldText makeText(const std::string& buffer, std::size_t caret,
                    std::size_t anchor) {
     FieldText text;
@@ -20,12 +27,18 @@ FieldText makeText(const std::string& buffer, std::size_t caret,
     return text;
 }
 
+/// @brief Build a FieldText with the caret at the index and no selection
+/// (anchor collapsed onto the caret).
+/// @param buffer The field's text.
+/// @param caret The caret index into buffer.
+/// @return A FieldText with caret == anchor == index.
 FieldText caretAt(const std::string& buffer, std::size_t caret) {
     return makeText(buffer, caret, caret);
 }
 
 }  // namespace
 
+/// @brief Inserts splice at the caret and advance it past the new char.
 TEST_CASE("textfield_caret_insert_at_start_middle_end", "[app][textfield]") {
     FieldText text = caretAt("23", 0);
     CHECK(fieldInsertChar(TextField::Bodies, '1', text));
@@ -44,6 +57,7 @@ TEST_CASE("textfield_caret_insert_at_start_middle_end", "[app][textfield]") {
     CHECK(text.caret == 3);
 }
 
+/// @brief The seed '-' is legal at buffer position 0 of the result only.
 TEST_CASE("textfield_caret_insert_seed_sign_rule", "[app][textfield]") {
     // '-' is legal at buffer position 0 only (resulting-string law).
     FieldText text = caretAt("42", 0);
@@ -70,6 +84,7 @@ TEST_CASE("textfield_caret_insert_seed_sign_rule", "[app][textfield]") {
     CHECK(text.anchor == 0);
 }
 
+/// @brief One dot max per field; dots and letters the field forbids fail.
 TEST_CASE("textfield_caret_insert_dot_and_char_rules", "[app][textfield]") {
     FieldText text = caretAt("15", 1);
     CHECK(fieldInsertChar(TextField::Separation, '.', text));
@@ -94,6 +109,7 @@ TEST_CASE("textfield_caret_insert_dot_and_char_rules", "[app][textfield]") {
     CHECK(text.anchor == 1);
 }
 
+/// @brief Inserts past the field's length cap are refused, caret intact.
 TEST_CASE("textfield_caret_insert_overflow", "[app][textfield]") {
     FieldText text = caretAt("", 0);
     CHECK(fieldInsertChar(TextField::Planets, '5', text));
@@ -113,6 +129,7 @@ TEST_CASE("textfield_caret_insert_overflow", "[app][textfield]") {
     CHECK(text.caret == 19);
 }
 
+/// @brief Typing replaces the selection span; refused inserts keep it.
 TEST_CASE("textfield_caret_insert_replaces_selection", "[app][textfield]") {
     FieldText text = makeText("1234", 4, 0);  // caret > anchor
     CHECK(fieldInsertChar(TextField::Bodies, '9', text));
@@ -140,6 +157,8 @@ TEST_CASE("textfield_caret_insert_replaces_selection", "[app][textfield]") {
     CHECK(text.anchor == 2);
 }
 
+/// @brief Inserts keep the no-leading-zero invariant and track the caret
+/// across the trimmed run.
 TEST_CASE("textfield_caret_leading_zero_trim_law", "[app][textfield]") {
     // Mid-buffer insert never breaks the no-leading-zero-run invariant.
     FieldText text = caretAt("10", 1);
@@ -175,6 +194,7 @@ TEST_CASE("textfield_caret_leading_zero_trim_law", "[app][textfield]") {
     CHECK(text.caret == 2);
 }
 
+/// @brief Delete/backspace remove one char, honor edges and the trim law.
 TEST_CASE("textfield_caret_delete_char", "[app][textfield]") {
     FieldText text = caretAt("123", 1);
     CHECK(fieldEditDelete(TextField::Bodies, text, /*forward=*/true));
@@ -218,6 +238,7 @@ TEST_CASE("textfield_caret_delete_char", "[app][textfield]") {
     CHECK(text.caret == 0);
 }
 
+/// @brief Deleting with a selection clears the span in either direction.
 TEST_CASE("textfield_caret_delete_with_selection", "[app][textfield]") {
     FieldText text = makeText("1234", 3, 1);
     CHECK(fieldEditDelete(TextField::Bodies, text, /*forward=*/true));
@@ -238,6 +259,7 @@ TEST_CASE("textfield_caret_delete_with_selection", "[app][textfield]") {
     CHECK(text.anchor == 0);
 }
 
+/// @brief Copy yields the selection span, or the whole buffer if none.
 TEST_CASE("textfield_caret_copy_text", "[app][textfield]") {
     CHECK(fieldCopyText(caretAt("42", 1)) == "42");  // no selection: buffer
     CHECK(fieldCopyText(makeText("1234", 3, 1)) == "23");
@@ -245,6 +267,7 @@ TEST_CASE("textfield_caret_copy_text", "[app][textfield]") {
     CHECK(fieldCopyText(caretAt("", 0)).empty());
 }
 
+/// @brief Caret moves clamp at the edges; select extends or collapses.
 TEST_CASE("textfield_caret_move_and_select", "[app][textfield]") {
     FieldText text = caretAt("1234", 0);
     CHECK(fieldMoveCaret(text, 1, /*select=*/false));
@@ -276,6 +299,7 @@ TEST_CASE("textfield_caret_move_and_select", "[app][textfield]") {
     CHECK(text.anchor == 3);
 }
 
+/// @brief Home/End moves are idempotent and honor the select flag.
 TEST_CASE("textfield_caret_home_end", "[app][textfield]") {
     FieldText text = caretAt("1234", 2);
     fieldMoveCaretTo(text, /*toEnd=*/false, /*select=*/false);
@@ -298,6 +322,7 @@ TEST_CASE("textfield_caret_home_end", "[app][textfield]") {
     CHECK(text.anchor == 4);
 }
 
+/// @brief fieldDeleteSelection clears spans and leaves plain carets alone.
 TEST_CASE("textfield_delete_selection_helper", "[app][textfield]") {
     FieldText text = makeText("1234", 3, 0);
     fieldDeleteSelection(text);
@@ -318,6 +343,7 @@ TEST_CASE("textfield_delete_selection_helper", "[app][textfield]") {
     CHECK(text.anchor == 2);
 }
 
+/// @brief Paste truncates to the buffer cap, never the other way around.
 TEST_CASE("textfield_paste_replaces_selection", "[app][textfield]") {
     // Buffer max length wins; the paste is truncated, never the buffer.
     FieldText text = makeText("12", 2, 0);  // select-all, cap 4
@@ -349,6 +375,7 @@ TEST_CASE("textfield_paste_replaces_selection", "[app][textfield]") {
     CHECK(text.caret == 4);
 }
 
+/// @brief Paste applies the char grammar and selection-clearing rules.
 TEST_CASE("textfield_paste_grammar", "[app][textfield]") {
     // Per-char grammar matches fieldSanitizePaste against the result.
     FieldText text = caretAt("", 0);
@@ -398,6 +425,7 @@ TEST_CASE("textfield_paste_grammar", "[app][textfield]") {
     CHECK(text.caret == 3);
 }
 
+/// @brief Fraction-to-index maps round, clamp, and survive NaN input.
 TEST_CASE("textfield_index_for_fraction", "[app][textfield]") {
     CHECK(fieldIndexForFraction(0.0, 4) == 0);
     CHECK(fieldIndexForFraction(1.0, 4) == 4);
