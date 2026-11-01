@@ -129,7 +129,7 @@ bool grammarOk(TextField field, const std::string& text) {
 
 }  // namespace
 
-bool fieldAppendChar(TextField field, char ch, std::string& buffer) {
+static bool fieldAppendChar(TextField field, char ch, std::string& buffer) {
     const FieldTraits traits = traitsFor(field);
     const bool digit = ch >= '0' && ch <= '9';
     const bool sign = traits.allowSign && ch == '-' && buffer.empty();

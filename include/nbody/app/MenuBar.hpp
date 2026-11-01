@@ -63,10 +63,11 @@ const char* menuPresetName(core::PresetName preset);
 // "Two-body", "Fig-8"); empty when the preset has no options.
 const char* menuOptionsHeaderLabel(core::PresetName preset);
 
-// Dropdown row indent law (spec builder call): rows that can carry a tick
-// dot (presets, integrator, dt, toggles) or hold a field readout keep
-// dot-at-10 / text-at-30; PLAIN rows (restart, roll buttons, separators)
-// indent 10. renderMenu draws every generic row label at
+// Dropdown row indent law (spec builder call): dot-class rows (presets,
+// integrator, dt) and value/field/toggle rows keep dot-at-10 / text-at-30
+// (toggles reserve the value indent but never draw a dot --
+// menuTickedIndex is -1 for them); PLAIN rows (restart, roll buttons,
+// separators) indent 10. renderMenu draws every generic row label at
 // row.x + menuRowTextIndent(...) and every tick dot at row.x +
 // kMenuRowDotIndent, so layout and render share ONE source of truth.
 // (Focused field editors keep their Task 5 draw pass and do not use this.)

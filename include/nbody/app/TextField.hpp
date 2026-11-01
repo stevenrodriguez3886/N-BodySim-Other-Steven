@@ -19,10 +19,11 @@ namespace nbody::app {
 // display-free (same rationale as StepPlanning/Starfield).
 enum class TextField : std::uint8_t { Seed, Bodies, Separation, Planets };
 
-// (The old buffer-only fieldAppendChar/fieldBackspace live on privately
-// inside TextField.cpp: the caret model below subsumes them -- typing with
+// (The old buffer-only append/backspace pair is gone from the public
+// surface: the caret model below subsumes them -- typing with
 // caret == anchor == size() IS append, and Backspace is fieldEditDelete
-// with forward = false.)
+// with forward = false. A file-static fieldAppendChar survives in
+// TextField.cpp only as fieldSanitizePaste's per-char grammar helper.)
 
 // Paste filter (D.4): keeps only the characters that fit the field's
 // grammar, applying the SAME overflow rules as typing (first-come-first-
