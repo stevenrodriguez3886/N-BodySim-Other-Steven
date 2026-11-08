@@ -16,6 +16,7 @@ using nbody::core::Vec2;
 namespace {
 
 // Fixed window extents shared by every transform assertion below.
+// test push - Stephen T
 constexpr double kWinW = 800.0;
 constexpr double kWinH = 600.0;
 constexpr double kEps = 1e-9;
