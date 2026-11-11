@@ -1,7 +1,8 @@
 /// @file
 /// Declares SimulationApp, the interactive SFML 3 frontend for the n-body
 /// core: a fixed-timestep physics loop, an in-window menu bar with inline
-/// text fields, camera pan/zoom, title-bar stats and hover tooltips.
+/// text fields, camera pan/zoom, an energy-error HUD, title-bar stats and
+/// hover tooltips.
 
 #pragma once
 
@@ -30,9 +31,8 @@ namespace nbody::app {
 /// accumulated and consumed in whole physics steps, with clamps so a
 /// hang never turns into a catch-up burst. Camera pan (left-drag on the
 /// scene) and zoom (mouse wheel) navigate the view; FPS/UPS/body/time
-/// stats live in the window title bar only -- there is deliberately no
-/// on-screen HUD, while a loadable font still renders menu labels and
-/// the staged chip in-window.
+/// stats live in the window title bar, while the energy-error HUD, menu
+/// labels and staged chip render in-window.
 ///
 /// Menu/field interaction: a top bar of headers opens dropdowns of
 /// actions, toggles and inline text fields sharing one editor. Option
@@ -197,6 +197,7 @@ private:
     int framesInWindow_ = 0;  ///< frames drawn in the current stats window
     std::uint64_t lastTotalSteps_ = 0;  ///< totalSteps() at the last refresh
     std::string statsSuffix_;  // " | FPS xx | UPS xxx | N bodies | t=ss.s"
+    double initialEnergy_ = 0.0;  ///< total energy at the current scene's start
 
     /// @brief Sets the zoom so ~80% of the bodies' bounding radius is
     /// visible, centred on the origin.

@@ -54,6 +54,8 @@ public:
     IIntegrator& integrator();                     ///< active integrator
     double simulationTime() const;  ///< accumulated sim seconds
     double timeStep() const;        ///< cfg_.timeStep, needed by the app loop
+    /// @brief Return kinetic plus pairwise softened gravitational energy.
+    double totalEnergy() const;
     std::uint64_t totalSteps() const;  ///< step() calls since the reset
     std::uint64_t mergeCount() const;  ///< merges performed since the reset
 

@@ -1,9 +1,16 @@
-# N-Body Simulation: The Basic Idea
+# N-Body Simulation Intro
+An **N-body simulation** predicts how a collection of particles moves relative to each other while
+experiencing gravity. In this project, each body is a
+point-like object in a 2D world with a mass $m$, position vector
+$\mathbf{r}$, and velocity vector $\dot{\mathbf{r}}$.
 
-An **N-body simulation** predicts how a collection of masses moves when every
-mass attracts every other mass through gravity. In this project, each body is a
-point-like object in a 2D world with a mass $m$, position
-$\mathbf{x}$, and velocity $\mathbf{v}$.
+$$
+\mathbf{r} = \begin{bmatrix} x \\ y \end{bmatrix},
+\qquad
+\dot{\mathbf{r}} = \begin{bmatrix} \dot{x} \\ \dot{y} \end{bmatrix}
+\qquad
+\ddot{\mathbf{r}} = \begin{bmatrix} \ddot{x} \\ \ddot{y} \end{bmatrix}
+$$
 
 ## 1. Newton's law of gravity
 
@@ -16,13 +23,13 @@ $$
 where $G$ is the gravitational constant and $r_{ij}$ is the distance
 between the bodies. The force points from body $i$ toward body $j$.
 
-The simulation uses Newton's second law, $\mathbf{F}=m\mathbf{a}$, to turn
+The simulation uses Newton's second law, $\mathbf{F}=m\ddot{\mathbf{r}}$, to turn
 force into acceleration. The acceleration of body $i$ caused by body $j$
 is
 
 $$
-\mathbf{a}_{i\leftarrow j}
-  = Gm_j\frac{\mathbf{x}_j-\mathbf{x}_i}{r_{ij}^{3}}.
+\ddot{\mathbf{r}}_{i\leftarrow j}
+  = Gm_j\frac{\mathbf{r}_j-\mathbf{r}_i}{r_{ij}^{3}}.
 $$
 
 Notice that $m_i$ is not in this final expression: a more massive body feels
@@ -35,9 +42,9 @@ Because gravitational accelerations add as vectors, the complete acceleration
 is the sum of the contributions:
 
 $$
-\mathbf{a}_i
+\ddot{\mathbf{r}}_i
   = \sum_{\substack{j=1\\j\ne i}}^{N}
-    Gm_j\frac{\mathbf{x}_j-\mathbf{x}_i}{r_{ij}^{3}}.
+    Gm_j\frac{\mathbf{r}_j-\mathbf{r}_i}{r_{ij}^{3}}.
 $$
 
 At each simulation step, the program:
@@ -45,7 +52,7 @@ At each simulation step, the program:
 1. Looks at every pair of bodies.
 2. Finds their separation and the direction between them.
 3. Adds that pair's acceleration to both bodies in opposite directions.
-4. Uses the resulting $\mathbf{a}_i$ to update position and velocity.
+4. Uses the resulting $\ddot{\mathbf{r}}_i$ to update position and velocity.
 
 Updating both bodies with equal-and-opposite pair contributions is Newton's
 third law in action. It also helps preserve the system's total momentum.
@@ -57,8 +64,8 @@ simulator uses a small softening value in the denominator,
 $r^2+\varepsilon^2$, to keep close encounters numerically stable:
 
 $$
-\mathbf{a}_{i\leftarrow j}
-  = Gm_j\frac{\mathbf{x}_j-\mathbf{x}_i}
+\ddot{\mathbf{r}}_{i\leftarrow j}
+  = Gm_j\frac{\mathbf{r}_j-\mathbf{r}_i}
   {(r_{ij}^{2}+\varepsilon^2)r_{ij}}.
 $$
 
@@ -74,11 +81,11 @@ Euler is the simplest approximation. It evaluates acceleration once, at the
 current positions, and advances using
 
 $$
-\mathbf{x}(t+\Delta t)
-  \approx \mathbf{x}(t)+\mathbf{v}(t)\Delta t,
+\mathbf{r}(t+\Delta t)
+  \approx \mathbf{r}(t)+\dot{\mathbf{r}}(t)\Delta t,
 \qquad
-\mathbf{v}(t+\Delta t)
-  \approx \mathbf{v}(t)+\mathbf{a}(t)\Delta t.
+\dot{\mathbf{r}}(t+\Delta t)
+  \approx \dot{\mathbf{r}}(t)+\ddot{\mathbf{r}}(t)\Delta t.
 $$
 
 It is fast because it needs one gravity calculation per step. However, the
@@ -98,7 +105,7 @@ $$
    \left(\mathbf{k}_1+2\mathbf{k}_2+2\mathbf{k}_3+\mathbf{k}_4\right),
 \qquad
 \mathbf{y}=
-\begin{bmatrix}\mathbf{x}\\\mathbf{v}\end{bmatrix}.
+\begin{bmatrix}\mathbf{r}\\\dot{\mathbf{r}}\end{bmatrix}.
 $$
 
 Here, each $\mathbf{k}$ is a derivative estimate containing both velocity
@@ -106,8 +113,8 @@ and acceleration. RK4 costs about four gravity evaluations per step, but it
 usually follows curved orbits much more accurately than Euler for the same
 time step.
 
-For the coupled state $\mathbf{y}=[\mathbf{x};\mathbf{v}]$, define
-$\mathbf{f}(\mathbf{y})=[\mathbf{v};\mathbf{a}(\mathbf{x})]$. The four
+For the coupled state $\mathbf{y}=[\mathbf{r};\dot{\mathbf{r}}]$, define
+$\mathbf{f}(\mathbf{y})=[\dot{\mathbf{r}};\ddot{\mathbf{r}}(\mathbf{r})]$. The four
 derivative estimates are
 
 $$

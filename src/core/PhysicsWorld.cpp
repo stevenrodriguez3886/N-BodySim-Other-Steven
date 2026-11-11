@@ -89,6 +89,23 @@ double PhysicsWorld::timeStep() const {
     return cfg_.timeStep;
 }
 
+double PhysicsWorld::totalEnergy() const {
+    double energy = 0.0;
+    for (const Body& body : bodies_) {
+        energy += 0.5 * body.mass * lengthSq(body.velocity);
+    }
+
+    const double eps2 = cfg_.softening * cfg_.softening;
+    for (std::size_t i = 0; i < bodies_.size(); ++i) {
+        for (std::size_t j = i + 1; j < bodies_.size(); ++j) {
+            const Vec2 delta = bodies_[j].position - bodies_[i].position;
+            const double distance = std::sqrt(lengthSq(delta) + eps2);
+            energy -= cfg_.g * bodies_[i].mass * bodies_[j].mass / distance;
+        }
+    }
+    return energy;
+}
+
 std::uint64_t PhysicsWorld::totalSteps() const {
     return steps_;
 }

@@ -118,6 +118,27 @@ std::string formatOptionValue(double value) {
     return out.str();
 }
 
+std::string formatEnergyError(double initialEnergy, double currentEnergy) {
+    std::ostringstream out;
+    out << "Energy error: ";
+    if (std::isfinite(initialEnergy) && std::isfinite(currentEnergy) &&
+        std::abs(initialEnergy) > std::numeric_limits<double>::epsilon()) {
+        const double percent =
+            std::abs(currentEnergy - initialEnergy) / std::abs(initialEnergy) *
+            100.0;
+        out << std::fixed << std::setprecision(3) << percent << '%';
+    } else {
+        out << "n/a";
+    }
+    out << " | Energy: ";
+    if (std::isfinite(currentEnergy)) {
+        out << std::setprecision(8) << currentEnergy;
+    } else {
+        out << "n/a";
+    }
+    return out.str();
+}
+
 /// @brief The header value readout for a menu group (value-first, like
 /// the Cloud seed readout).
 /// @param state The live menu state the readout reflects.
@@ -190,6 +211,7 @@ SimulationApp::SimulationApp(core::SimulationSetup setup,
     menuState_.bodies = bodies;
     menuState_.dt = setup.config.timeStep;
     world_.reset(std::move(setup.bodies));
+    initialEnergy_ = world_.totalEnergy();
     fitCamera();
     updateStats();  // seed the title-bar stats so the HUD isn't blank pre-0.5 s
 }
@@ -222,6 +244,7 @@ void SimulationApp::rebuildScene(bool refitCamera) {
     world_.setGravity(setup.config.g, setup.config.softening);
     world_.reset(std::move(setup.bodies));
     world_.setTimeStep(menuState_.dt);
+    initialEnergy_ = world_.totalEnergy();
     accumulator_ = 0.0;
     if (refitCamera) {
         fitCamera();
@@ -1066,9 +1089,15 @@ void SimulationApp::render() {
         drawBody(window_, b, camera_, w, h);
     }
 
-    // No on-screen HUD by design: stats live in the title bar only
-    // (updateStats). The staged chip below stays -- it is menu UI, not
-    // a HUD.
+    if (font_) {
+        sf::Text energyText{*font_};
+        energyText.setCharacterSize(16);
+        energyText.setFillColor(kHudColor);
+        energyText.setPosition(sf::Vector2f{12.0F, 38.0F});
+        energyText.setString(
+            formatEnergyError(initialEnergy_, world_.totalEnergy()));
+        window_.draw(energyText);
+    }
 
     const MenuLayout layout =
         menuLayout(w, h, menuState_.openGroup, menuState_.preset);
